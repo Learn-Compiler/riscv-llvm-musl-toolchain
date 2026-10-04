@@ -1,0 +1,19 @@
+# Build artifacts
+/.bootstrap/
+/.build-stamps/
+/.musl-shim/
+/build-*/
+/install-*/
+/*.log
+/*.tar.zst
+/SHA256SUMS
+/riscv64-unknown-musl-linux/
+
+# Source downloads (if fetched inside repo)
+/llvm/
+/musl/
+
+# Editor / OS
+.DS_Store
+*.swp
+*~
