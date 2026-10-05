@@ -1,0 +1,2 @@
+# 存放应用于 llvm 源码树的 .patch 文件
+# 阶段 2 (scripts/02_fetch.sh) 会自动检测并应用本目录下的 *.patch

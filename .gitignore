@@ -9,11 +9,10 @@
 /SHA256SUMS
 /riscv64-unknown-musl-linux/
 
-# Source downloads (if fetched inside repo)
-/llvm/
-/musl/
-
 # Editor / OS
 .DS_Store
 *.swp
 *~
+
+# User local configuration
+/config/local.env

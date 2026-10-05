@@ -35,6 +35,16 @@
 # 仅重新编译 LLVM 模块（二次开发高频迭代时使用，跳过 builtins/musl 重复构建）
 ./build.sh --rebuild-llvm
 
+# 单步独立调试执行（支持: bootstrap, fetch, builtins, musl, llvm, prune, verify, package）
+./build.sh --step musl
+./build.sh --step verify
+
+# 从指定阶段开始向下连续执行（例如跳过 fetch 直接从 builtins 开始）
+./build.sh --from llvm
+
+# 指定目标平台配置（默认使用 config/targets/riscv64-linux-musl.env）
+./build.sh --target riscv64-linux-musl
+
 # 清理所有构建缓存与时间戳
 ./build.sh --clean
 
@@ -105,8 +115,30 @@ riscv64-unknown-linux-musl-clang -march=rv64gcv rvv_app.c -o rvv_app
 
 ```text
 riscv-llvm-musl-toolchain/
-├── build.sh              # 核心一键构建脚本（自举、编译、瘦身、配置全流程）
-├── linux-headers/        # Linux 内核头文件（系统调用与 POSIX 基础）
-├── .gitignore            # 忽略所有临时构建缓存、日志与归档
-└── README.md             # 架构与使用文档
+├── build.sh                      # 【主入口】参数解析、环境加载、流水线编排调度
+│
+├── config/                       # 【配置层】纯声明式环境与目标配置
+│   ├── default.env               # 全局通用配置（版本、依赖 URL、编译线程）
+│   ├── local.env.example         # 用户本地配置模板（可自由覆盖变量且被 Git 忽略）
+│   └── targets/                  # 目标平台配置目录
+│       └── riscv64-linux-musl.env# RISC-V 64 Musl 专属平台参数
+│
+├── scripts/                      # 【执行层】模块化独立步骤流水线
+│   ├── common.sh                 # 公共基础设施（日志、时间戳打标、断点续传下载、Git 克隆）
+│   ├── 01_bootstrap.sh           # 阶段 1：免 root 准备引导工具 & 探测宿主 C++
+│   ├── 02_fetch.sh               # 阶段 2：拉取源码或挂载本地自研源码并自动应用补丁
+│   ├── 03_builtins.sh            # 阶段 3：安装 Musl 基础头文件并编译 compiler-rt builtins
+│   ├── 04_musl.sh                # 阶段 4：配置并构建 Musl libc 并安装至 Sysroot
+│   ├── 05_llvm.sh                # 阶段 5：全量编译 LLVM/Clang 及全部运行时
+│   ├── 06_prune.sh               # 阶段 6：精简裁剪、Strip、三元组软链接与生成 .cfg 配置文件
+│   ├── 07_verify.sh              # 阶段 7：构建产物验证与 C/C++ 冒烟测试
+│   └── 08_package.sh             # 阶段 8：打包发布 (tar.zst) 与计算 SHA256 校验和
+│
+├── patches/                      # 【拓展层】组件补丁目录（自动检测应用）
+│   ├── llvm/                     # LLVM 自定义补丁 (*.patch)
+│   └── musl/                     # Musl 自定义补丁 (*.patch)
+│
+├── linux-headers/                # Linux 内核头文件（系统调用与 POSIX 基础）
+├── .gitignore                    # 忽略构建缓存与本地配置
+└── README.md                     # 架构与使用文档
 ```
