@@ -123,10 +123,14 @@ riscv-llvm-musl-toolchain/
 │   └── targets/                  # 目标平台配置目录
 │       └── riscv64-linux-musl.env# RISC-V 64 Musl 专属平台参数
 │
+├── third_party/                  # 【第三方子模组】Git Submodules
+│   ├── llvm/                     # LLVM 项目源码 (Git Submodule @ release/20.x)
+│   └── musl/                     # Musl C 库源码 (Git Submodule @ master)
+│
 ├── scripts/                      # 【执行层】模块化独立步骤流水线
 │   ├── common.sh                 # 公共基础设施（日志、时间戳打标、断点续传下载、Git 克隆）
 │   ├── 01_bootstrap.sh           # 阶段 1：免 root 准备引导工具 & 探测宿主 C++
-│   ├── 02_fetch.sh               # 阶段 2：拉取源码或挂载本地自研源码并自动应用补丁
+│   ├── 02_fetch.sh               # 阶段 2：准备源码 (Submodule 更新或挂载本地源码) 并自动应用补丁
 │   ├── 03_builtins.sh            # 阶段 3：安装 Musl 基础头文件并编译 compiler-rt builtins
 │   ├── 04_musl.sh                # 阶段 4：配置并构建 Musl libc 并安装至 Sysroot
 │   ├── 05_llvm.sh                # 阶段 5：全量编译 LLVM/Clang 及全部运行时
@@ -139,6 +143,7 @@ riscv-llvm-musl-toolchain/
 │   └── musl/                     # Musl 自定义补丁 (*.patch)
 │
 ├── linux-headers/                # Linux 内核头文件（系统调用与 POSIX 基础）
+├── .gitmodules                   # Git Submodule 配置声明
 ├── .gitignore                    # 忽略构建缓存与本地配置
 └── README.md                     # 架构与使用文档
 ```

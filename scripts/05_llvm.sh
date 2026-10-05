@@ -25,7 +25,7 @@ step_llvm() {
     step_host_cxx
   fi
 
-  "$BOOT/bin/cmake" -G Ninja -S "$SRC/llvm/llvm" -B "$BUILD" \
+  "$BOOT/bin/cmake" -G Ninja -S "$LLVM_DIR/llvm" -B "$BUILD" \
     -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_INSTALL_PREFIX="$INSTALL" \
     -DCMAKE_C_COMPILER="$BOOT/bin/clang" \

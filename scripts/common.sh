@@ -16,6 +16,8 @@ BUILD="${BUILD:-$SRC/build-llvm-musl}"
 BOOT="${BOOT:-$SRC/.bootstrap}"
 STAMPS="${STAMPS:-$SRC/.build-stamps}"
 SHIM="${SHIM:-$SRC/.musl-shim}"
+LLVM_DIR="${LLVM_DIR:-$SRC/third_party/llvm}"
+MUSL_DIR="${MUSL_DIR:-$SRC/third_party/musl}"
 
 # 将自举引导工具优先加入 PATH 与动态库检索路径
 export PATH="$BOOT/bin:${PATH}"

@@ -1,10 +1,10 @@
 [submodule "llvm"]
-	path = llvm
+	path = third_party/llvm
 	url = https://github.com/llvm/llvm-project.git
 	branch = release/20.x
 	shallow = true
 [submodule "musl"]
-	path = musl
+	path = third_party/musl
 	url = https://github.com/kraj/musl.git
 	branch = master
 	shallow = true

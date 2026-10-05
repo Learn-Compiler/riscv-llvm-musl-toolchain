@@ -21,7 +21,7 @@ step_musl() {
   done
   export PATH="$SHIM:$BOOT/bin:$PATH"
 
-  cd "$SRC/musl"
+  cd "$MUSL_DIR"
   make distclean >/dev/null 2>&1 || true
 
   local BUILTIN_LIB="$BOOT/$LLVM_PREBUILT/lib/clang/18/lib/linux/$RT_BUILTIN_NAME"

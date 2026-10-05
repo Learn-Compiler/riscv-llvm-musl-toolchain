@@ -42,39 +42,41 @@ step_fetch() {
   if [ -n "${LLVM_SRC:-}" ]; then
     log "使用本地自研 LLVM 源码: $LLVM_SRC"
     [ -d "$LLVM_SRC/llvm" ] || die "指定的 LLVM_SRC 缺少 llvm 目录: $LLVM_SRC"
-    ln -sfn "$LLVM_SRC" "$SRC/llvm"
+    mkdir -p "$(dirname "$LLVM_DIR")"
+    ln -sfn "$LLVM_SRC" "$LLVM_DIR"
   else
-    if [ ! -f "$SRC/llvm/llvm/CMakeLists.txt" ]; then
+    if [ ! -f "$LLVM_DIR/llvm/CMakeLists.txt" ]; then
       echo "  初始化并检出 llvm 子模组 ..."
-      git -C "$SRC" submodule update --init --depth 1 llvm || \
-        git -C "$SRC" submodule update --init llvm
+      git -C "$SRC" submodule update --init --depth 1 third_party/llvm || \
+        git -C "$SRC" submodule update --init third_party/llvm
     fi
-    ok "llvm 子模组已就绪 ($(git -C "$SRC/llvm" rev-parse --short HEAD 2>/dev/null || echo 'local'))"
+    ok "llvm 子模组已就绪 ($(git -C "$LLVM_DIR" rev-parse --short HEAD 2>/dev/null || echo 'local'))"
   fi
 
   # ---- 2. 准备 Musl 源码 ----
   if [ -n "${MUSL_SRC:-}" ]; then
     log "使用本地自研 Musl 源码: $MUSL_SRC"
     [ -f "$MUSL_SRC/configure" ] || die "指定的 MUSL_SRC 缺少 configure: $MUSL_SRC"
-    ln -sfn "$MUSL_SRC" "$SRC/musl"
+    mkdir -p "$(dirname "$MUSL_DIR")"
+    ln -sfn "$MUSL_SRC" "$MUSL_DIR"
   else
-    if [ ! -f "$SRC/musl/configure" ]; then
+    if [ ! -f "$MUSL_DIR/configure" ]; then
       echo "  初始化并检出 musl 子模组 ..."
-      git -C "$SRC" submodule update --init --depth 1 musl || \
-        git -C "$SRC" submodule update --init musl
+      git -C "$SRC" submodule update --init --depth 1 third_party/musl || \
+        git -C "$SRC" submodule update --init third_party/musl
     fi
-    ok "musl 子模组已就绪 ($(git -C "$SRC/musl" rev-parse --short HEAD 2>/dev/null || echo 'local'))"
+    ok "musl 子模组已就绪 ($(git -C "$MUSL_DIR" rev-parse --short HEAD 2>/dev/null || echo 'local'))"
   fi
 
   # ---- 3. 应用拓展补丁 ----
-  apply_patches "llvm" "$SRC/llvm"
-  apply_patches "musl" "$SRC/musl"
+  apply_patches "llvm" "$LLVM_DIR"
+  apply_patches "musl" "$MUSL_DIR"
 
   # ---- 4. 源码完整性校验 ----
-  [ -f "$SRC/llvm/llvm/CMakeLists.txt" ]        || die "llvm 源码不完整"
-  [ -f "$SRC/llvm/runtimes/CMakeLists.txt" ]    || die "runtimes 目录缺失"
-  [ -f "$SRC/llvm/compiler-rt/CMakeLists.txt" ] || die "compiler-rt 缺失"
-  [ -f "$SRC/musl/configure" ]                  || die "musl 源码不完整"
+  [ -f "$LLVM_DIR/llvm/CMakeLists.txt" ]        || die "llvm 源码不完整: $LLVM_DIR/llvm/CMakeLists.txt"
+  [ -f "$LLVM_DIR/runtimes/CMakeLists.txt" ]    || die "runtimes 目录缺失: $LLVM_DIR/runtimes/CMakeLists.txt"
+  [ -f "$LLVM_DIR/compiler-rt/CMakeLists.txt" ] || die "compiler-rt 缺失: $LLVM_DIR/compiler-rt/CMakeLists.txt"
+  [ -f "$MUSL_DIR/configure" ]                  || die "musl 源码不完整: $MUSL_DIR/configure"
 
   mark fetch
   ok "源码就绪"

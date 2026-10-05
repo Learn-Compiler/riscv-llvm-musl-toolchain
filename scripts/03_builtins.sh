@@ -20,7 +20,7 @@ step_builtins() {
 
   # 1. 安装 musl 基础头文件到 sysroot（只需头文件，几秒钟即可完成）
   echo "  安装 musl 头文件到 $SYSROOT/usr/include ..."
-  ( cd "$SRC/musl"
+  ( cd "$MUSL_DIR"
     make distclean >/dev/null 2>&1 || true
     CC="$BOOT/bin/clang --target=$T -fuse-ld=lld" \
     ./configure \
@@ -36,7 +36,7 @@ step_builtins() {
   mkdir -p "$RT_BUILD"
 
   "$BOOT/bin/cmake" -G Ninja \
-    -S "$SRC/llvm/compiler-rt/lib/builtins" \
+    -S "$LLVM_DIR/compiler-rt/lib/builtins" \
     -B "$RT_BUILD" \
     -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_C_COMPILER="$BOOT/bin/clang" \
