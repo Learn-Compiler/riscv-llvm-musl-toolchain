@@ -40,17 +40,31 @@ step_prune() {
   rm -rf "$INSTALL/lib/libear" "$INSTALL/lib/libscanbuild" "$INSTALL/libexec"
   rm -rf "$INSTALL/include/mach-o"
 
-  # 2. 对宿主可执行程序与共享库进行 strip（剥离多余符号，大幅减少体积）
-  for f in "$INSTALL/bin"/*; do
-    if [ -f "$f" ] && [ ! -L "$f" ] && file "$f" | grep -q 'ELF.*x86-64'; then
-      strip -s "$f" 2>/dev/null || true
+  # 2. 调试符号剥离控制（Strip）
+  local should_strip="$STRIP_SYMBOLS"
+  if [ "$should_strip" = "AUTO" ]; then
+    if [ "$BUILD_TYPE" = "Release" ]; then
+      should_strip="ON"
+    else
+      should_strip="OFF"
     fi
-  done
-  for f in "$INSTALL/lib"/*.so*; do
-    if [ -f "$f" ] && [ ! -L "$f" ] && file "$f" | grep -q 'ELF.*x86-64'; then
-      strip --strip-unneeded "$f" 2>/dev/null || true
-    fi
-  done
+  fi
+
+  if [ "$should_strip" = "ON" ]; then
+    echo "  正在剥离调试符号 (Strip) ..."
+    for f in "$INSTALL/bin"/*; do
+      if [ -f "$f" ] && [ ! -L "$f" ] && file "$f" | grep -q 'ELF.*x86-64'; then
+        strip -s "$f" 2>/dev/null || true
+      fi
+    done
+    for f in "$INSTALL/lib"/*.so*; do
+      if [ -f "$f" ] && [ ! -L "$f" ] && file "$f" | grep -q 'ELF.*x86-64'; then
+        strip --strip-unneeded "$f" 2>/dev/null || true
+      fi
+    done
+  else
+    ok "保留二进制调试符号 (STRIP_SYMBOLS=$should_strip, BUILD_TYPE=$BUILD_TYPE)"
+  fi
 
   # 3. 补全标准 llvm 工具符号链接
   [ -e "$INSTALL/bin/llvm-readelf" ] || ln -sf llvm-readobj "$INSTALL/bin/llvm-readelf"

@@ -25,6 +25,11 @@ show_help() {
   ./build.sh --fetch             仅准备自举工具并拉取源码
   ./build.sh --package           构建完成后打包生成 .tar.zst 离线发布包
   ./build.sh --rebuild-llvm      重新编译 LLVM 模块与运行库（二次开发常用）
+  ./build.sh --debug             二次开发调试模式 (RelWithDebInfo + Assertions + 保留符号)
+  ./build.sh --full-debug        完整调试模式 (Debug -O0 + Assertions + 保留符号)
+  ./build.sh --assertions        单独开启 LLVM 断言 (精确定位 Pass 与 ISel 崩溃)
+  ./build.sh --build-type <TYPE> 指定 CMake 构建模式 (Release|RelWithDebInfo|Debug)
+  ./build.sh --no-strip          保留宿主二进制与共享库调试符号
   ./build.sh --clean             清理编译临时目录与时间戳（保留 .bootstrap）
   ./build.sh --clean-all         清理所有内容（包括 .bootstrap 引导工具）
 
@@ -53,6 +58,9 @@ DO_PACKAGE=0
 REBUILD_LLVM=0
 SELECTED_STEP=""
 START_FROM=""
+CLI_BUILD_TYPE=""
+CLI_ASSERTIONS=""
+CLI_STRIP_SYMBOLS=""
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -69,6 +77,31 @@ while [ $# -gt 0 ]; do
       ;;
     --rebuild-llvm)
       REBUILD_LLVM=1
+      shift
+      ;;
+    --debug)
+      CLI_BUILD_TYPE="RelWithDebInfo"
+      CLI_ASSERTIONS="ON"
+      CLI_STRIP_SYMBOLS="OFF"
+      shift
+      ;;
+    --full-debug)
+      CLI_BUILD_TYPE="Debug"
+      CLI_ASSERTIONS="ON"
+      CLI_STRIP_SYMBOLS="OFF"
+      shift
+      ;;
+    --assertions)
+      CLI_ASSERTIONS="ON"
+      shift
+      ;;
+    --build-type)
+      [ -n "${2:-}" ] || die "--build-type 需要指定模式 (Release|RelWithDebInfo|Debug)"
+      CLI_BUILD_TYPE="$2"
+      shift 2
+      ;;
+    --no-strip)
+      CLI_STRIP_SYMBOLS="OFF"
       shift
       ;;
     --step)
@@ -106,6 +139,9 @@ done
 
 # 初始化基础配置与目标平台
 init_config
+[ -n "$CLI_BUILD_TYPE" ]     && BUILD_TYPE="$CLI_BUILD_TYPE"
+[ -n "$CLI_ASSERTIONS" ]     && ENABLE_ASSERTIONS="$CLI_ASSERTIONS"
+[ -n "$CLI_STRIP_SYMBOLS" ]  && STRIP_SYMBOLS="$CLI_STRIP_SYMBOLS"
 
 # ─── 前置检查 ────────────────────────────────────────────────────────────
 [ -d "$SRC/linux-headers/include" ] || die "缺少 $SRC/linux-headers/include"
@@ -113,7 +149,7 @@ command -v curl >/dev/null || die "缺少 curl"
 command -v tar  >/dev/null || die "缺少 tar"
 
 printf '%s%s 无 GCC 工具链构建%s\n' "$c_hd" "$TARGET_TRIPLE" "$c_off"
-printf '  SRC     = %s\n  INSTALL = %s\n  JOBS    = %s\n' "$SRC" "$INSTALL" "$JOBS"
+printf '  SRC     = %s\n  INSTALL = %s\n  JOBS    = %s\n  BUILD   = %s (Assertions: %s, Strip: %s)\n' "$SRC" "$INSTALL" "$JOBS" "$BUILD_TYPE" "$ENABLE_ASSERTIONS" "$STRIP_SYMBOLS"
 
 # 引入所有步骤模块
 # shellcheck disable=SC1091

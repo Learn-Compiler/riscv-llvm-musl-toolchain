@@ -65,13 +65,26 @@ LLVM_SRC=/path/to/your/custom-llvm-project ./build.sh
 ```
 `build.sh` 会自动检测并挂载您的本地 LLVM 源码树进行编译，产出包含您自定义特性的专属工具链。
 
-### 2. 日常二次开发工作流
-1. 在您的 `custom-llvm-project` 中修改代码（例如 TableGen `.td` 指令定义、ISel 匹配规则、指令调度模型或自定义 Pass）；
-2. 运行快速重编命令验证工具链与冒烟测试：
-   ```bash
-   LLVM_SRC=/path/to/your/custom-llvm-project ./build.sh --rebuild-llvm
-   ```
-3. 直接使用生成的编译器编译目标程序并验证向量/指令生成。
+### 2. 日常二次开发与调试模式（Debug / RelWithDebInfo / Assertions）
+
+LLVM 二次开发调试与普通软件开发不同：
+- **纯 Debug 模式 (-O0 -g)**：二进制极其庞大（单个 clang > 2GB），链接极耗内存，运行极慢。
+- **黄金调试组合（推荐）**：`RelWithDebInfo + Assertions=ON`。保留 `-O2` 运行速度，附带 gdb 调试符号，并开启内核断言（精确定位 Pass 与 ISel 语法和逻辑 Bug）。
+
+构建命令速查：
+```bash
+# 1. 开启二次开发推荐调试模式 (RelWithDebInfo + Assertions + 保留符号)
+./build.sh --debug
+
+# 2. 结合本地自研源码增量调试重编 (二次开发最高频操作)
+LLVM_SRC=/path/to/my-llvm ./build.sh --rebuild-llvm --debug
+
+# 3. 极速内循环调试（仅重编 clang 本体，数十秒即可验证）
+.bootstrap/bin/ninja -C build-llvm-musl clang install
+
+# 4. 纯单步调试模式 (-O0 -g + Assertions)
+./build.sh --full-debug
+```
 
 ### 3. 如何跟进官方 LLVM 版本升级
 当上游 LLVM 发布新大版本（例如 18 -> 19 -> 20）时：
