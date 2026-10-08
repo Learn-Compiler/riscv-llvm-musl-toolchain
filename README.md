@@ -10,6 +10,7 @@
 - **100% 纯 LLVM 生态闭环**：彻底摒弃 GCC、GNU Binutils 和 `libgcc`，所有底座运行时由 `compiler-rt builtins` 和 `libc++` 提供。
 - **免 root 宿主自举**：全自动准备独立的 Clang、CMake、Ninja 与必要依赖，不依赖宿主机系统全局开发环境，不污染宿主系统。
 - **专为二次开发设计**：支持通过 `LLVM_SRC` 环境变量直接挂载本地自研/二次开发的 LLVM 源码树，支持微调自研指令、调度模型与优化 Pass 并快速迭代。
+- **全方位调试模式支持**：提供 `--debug` (RelWithDebInfo + Assertions) 与 `--full-debug` (Debug -O0) 一键切换，智能保留调试符号，支持 GDB/LLDB 源码级调试与 TableGen 编译加速。
 - **工业级瘦身与裁剪**：自动剔除 Windows、macOS、GPU Offload、Python 静态分析等数十个无关跨平台冗余组件，执行宿主符号剥离（Strip），体积减少 >60%（离线发布包仅 ~100MB）。
 - **即开即用（Relocatable & Zero-flags）**：内置 `riscv64-unknown-linux-musl.cfg` 便携配置文件与 15 个标准三元组软链接，无需输入长串 `--target` 和 `--sysroot` 参数。
 
@@ -34,6 +35,21 @@
 
 # 仅重新编译 LLVM 模块（二次开发高频迭代时使用，跳过 builtins/musl 重复构建）
 ./build.sh --rebuild-llvm
+
+# 开启推荐二次开发调试模式（RelWithDebInfo + Assertions + 保留符号）
+./build.sh --debug
+
+# 开启纯单步调试模式（Debug -O0 -g + Assertions + 保留符号）
+./build.sh --full-debug
+
+# 任意模式下显式开启 LLVM 断言（精确定位 Pass 与 ISel 崩溃）
+./build.sh --assertions
+
+# 自由指定 CMake 构建类型 (Release | RelWithDebInfo | Debug)
+./build.sh --build-type RelWithDebInfo
+
+# 显式禁止剥离调试符号（保留所有 .debug_* 段）
+./build.sh --no-strip
 
 # 单步独立调试执行（支持: bootstrap, fetch, builtins, musl, llvm, prune, verify, package）
 ./build.sh --step musl
@@ -68,22 +84,52 @@ LLVM_SRC=/path/to/your/custom-llvm-project ./build.sh
 ### 2. 日常二次开发与调试模式（Debug / RelWithDebInfo / Assertions）
 
 LLVM 二次开发调试与普通软件开发不同：
-- **纯 Debug 模式 (-O0 -g)**：二进制极其庞大（单个 clang > 2GB），链接极耗内存，运行极慢。
-- **黄金调试组合（推荐）**：`RelWithDebInfo + Assertions=ON`。保留 `-O2` 运行速度，附带 gdb 调试符号，并开启内核断言（精确定位 Pass 与 ISel 语法和逻辑 Bug）。
+- **纯 Debug 模式 (`-O0 -g`)**：二进制极其庞大（单个 clang > 2GB），链接极耗内存（容易触发 OOM），编译器运行慢 10~20 倍。
+- **黄金调试组合（业界推荐）**：`RelWithDebInfo + Assertions=ON`。
+  - 保留 `-O2` 运行速度（日常编译测试无需漫长等待）；
+  - 保留完整 GDB/LLDB 调试符号（断点调试时可直接查看源码行号与变量）；
+  - 自动开启 LLVM 核心断言（**最关键机制**：Pass 或 ISel 语法与逻辑写错时，直接在终端精准指出哪行断言失败，杜绝静默段错误）；
+  - 自动启用 `-DLLVM_OPTIMIZED_TABLEGEN=ON`，避免调试版代码生成器拖慢整体编译。
 
-构建命令速查：
+#### 构建命令速查：
 ```bash
-# 1. 开启二次开发推荐调试模式 (RelWithDebInfo + Assertions + 保留符号)
+# 1. 开启二次开发推荐调试模式 (RelWithDebInfo + Assertions + 自动保留符号)
 ./build.sh --debug
 
 # 2. 结合本地自研源码增量调试重编 (二次开发最高频操作)
 LLVM_SRC=/path/to/my-llvm ./build.sh --rebuild-llvm --debug
 
-# 3. 极速内循环调试（仅重编 clang 本体，数十秒即可验证）
+# 3. 极速内循环调试（仅增量重编 clang 本体并安装，数十秒内完成）
 .bootstrap/bin/ninja -C build-llvm-musl clang install
 
-# 4. 纯单步调试模式 (-O0 -g + Assertions)
+# 4. 纯无优化单步调试模式 (-O0 -g + Assertions)
 ./build.sh --full-debug
+```
+
+#### 持久化配置（免命令行参数）：
+复制并编辑 `config/local.env`：
+```bash
+cp config/local.env.example config/local.env
+```
+在文件中配置：
+```bash
+LLVM_SRC="/path/to/my-llvm"     # 挂载本地自研源码
+BUILD_TYPE="RelWithDebInfo"     # 调试模式
+ENABLE_ASSERTIONS="ON"          # 开启断言抓 Bug
+STRIP_SYMBOLS="OFF"             # 保留调试符号
+```
+
+#### 使用 GDB 源码级调试 Clang 编译器：
+构建完成后，可以直接使用 GDB 对 Clang 编译过程进行动态追踪：
+```bash
+# 启动 GDB 调试 Clang 编译测试程序
+gdb --args install-clang-musl/bin/riscv64-unknown-linux-musl-clang -O2 test.c
+
+# 在 GDB 中对自研 Pass 或指令选择函数设置断点
+(gdb) b RISCVISelDAGToDAG.cpp:450
+(gdb) run
+(gdb) bt                        # 查看完整崩溃或调用堆栈
+(gdb) p Node->dump()           # 打印 SelectionDAG 节点状态
 ```
 
 ### 3. 如何跟进官方 LLVM 版本升级
