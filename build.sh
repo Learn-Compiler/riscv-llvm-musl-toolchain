@@ -27,6 +27,7 @@ show_help() {
   ./build.sh --debug             二次开发推荐调试模式 (RelWithDebInfo -O2 -g + Assertions + 保留符号)
   ./build.sh --full-debug        单步源码级纯调试模式 (Debug -O0 -g + Assertions + 保留符号)
   ./build.sh --build-type <TYPE> 自定义 CMake 构建模式 (Release|RelWithDebInfo|Debug|MinSizeRel)
+  ./build.sh --runtimes-build-type <TYPE> 自定义目标端运行库构建模式 (默认: Release)
 
 库类型与链接模式 (默认未指定为静态库，指定后为动态库):
   ./build.sh --shared, --share   编译目标共享库 (.so) 与静态库 (.a)，工具链默认动态链接
@@ -79,6 +80,7 @@ REBUILD_LLVM=0
 SELECTED_STEPS=()
 START_FROM=""
 CLI_BUILD_TYPE=""
+CLI_RUNTIMES_BUILD_TYPE=""
 CLI_ASSERTIONS=""
 CLI_STRIP_SYMBOLS=""
 CLI_ENABLE_SHARED=""
@@ -91,6 +93,7 @@ while [ $# -gt 0 ]; do
       ;;
     --default)
       CLI_BUILD_TYPE="Release"
+      CLI_RUNTIMES_BUILD_TYPE="Release"
       CLI_ASSERTIONS="OFF"
       CLI_STRIP_SYMBOLS="AUTO"
       CLI_ENABLE_SHARED="OFF"
@@ -124,6 +127,11 @@ while [ $# -gt 0 ]; do
     --build-type)
       [ -n "${2:-}" ] || die "--build-type 需要指定模式 (Release|RelWithDebInfo|Debug|MinSizeRel)"
       CLI_BUILD_TYPE="$2"
+      shift 2
+      ;;
+    --runtimes-build-type)
+      [ -n "${2:-}" ] || die "--runtimes-build-type 需要指定模式 (Release|RelWithDebInfo|Debug|MinSizeRel)"
+      CLI_RUNTIMES_BUILD_TYPE="$2"
       shift 2
       ;;
     --strip)
@@ -198,6 +206,7 @@ done
 # 初始化基础配置与目标平台
 init_config
 [ -n "$CLI_BUILD_TYPE" ]          && BUILD_TYPE="$CLI_BUILD_TYPE"
+[ -n "$CLI_RUNTIMES_BUILD_TYPE" ] && RUNTIMES_BUILD_TYPE="$CLI_RUNTIMES_BUILD_TYPE"
 [ -n "$CLI_ASSERTIONS" ]          && ENABLE_ASSERTIONS="$CLI_ASSERTIONS"
 [ -n "$CLI_STRIP_SYMBOLS" ]       && STRIP_SYMBOLS="$CLI_STRIP_SYMBOLS"
 [ -n "$CLI_ENABLE_SHARED" ]       && ENABLE_SHARED="$CLI_ENABLE_SHARED"
@@ -214,7 +223,7 @@ command -v curl >/dev/null || die "缺少 curl"
 command -v tar  >/dev/null || die "缺少 tar"
 
 printf '%s%s 无 GCC 工具链构建%s\n' "$c_hd" "$TARGET_TRIPLE" "$c_off"
-printf '  SRC     = %s\n  INSTALL = %s\n  JOBS    = %s\n  BUILD   = %s (Assertions: %s, Strip: %s, Shared: %s, DefaultStatic: %s)\n' "$SRC" "$INSTALL" "$JOBS" "$BUILD_TYPE" "$ENABLE_ASSERTIONS" "$STRIP_SYMBOLS" "$ENABLE_SHARED" "$DEFAULT_STATIC_LINK"
+printf '  SRC     = %s\n  INSTALL = %s\n  JOBS    = %s\n  BUILD   = %s (Runtimes: %s, Assertions: %s, Strip: %s, Shared: %s, DefaultStatic: %s)\n' "$SRC" "$INSTALL" "$JOBS" "$BUILD_TYPE" "$RUNTIMES_BUILD_TYPE" "$ENABLE_ASSERTIONS" "$STRIP_SYMBOLS" "$ENABLE_SHARED" "$DEFAULT_STATIC_LINK"
 
 # 引入所有步骤模块
 # shellcheck disable=SC1091
