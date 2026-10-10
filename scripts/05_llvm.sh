@@ -69,6 +69,12 @@ step_llvm() {
     -DRUNTIMES_${T}_LIBUNWIND_USE_COMPILER_RT=ON \
     -DRUNTIMES_${T}_LIBCXXABI_USE_COMPILER_RT=ON \
     -DRUNTIMES_${T}_LIBCXXABI_USE_LLVM_UNWINDER=ON \
+    -DRUNTIMES_${T}_LIBCXX_ENABLE_SHARED=${ENABLE_SHARED:-OFF} \
+    -DRUNTIMES_${T}_LIBCXX_ENABLE_STATIC=ON \
+    -DRUNTIMES_${T}_LIBCXXABI_ENABLE_SHARED=${ENABLE_SHARED:-OFF} \
+    -DRUNTIMES_${T}_LIBCXXABI_ENABLE_STATIC=ON \
+    -DRUNTIMES_${T}_LIBUNWIND_ENABLE_SHARED=${ENABLE_SHARED:-OFF} \
+    -DRUNTIMES_${T}_LIBUNWIND_ENABLE_STATIC=ON \
     -DRUNTIMES_${T}_CMAKE_C_FLAGS="--sysroot=$SYSROOT" \
     -DRUNTIMES_${T}_CMAKE_CXX_FLAGS="--sysroot=$SYSROOT" \
     -DRUNTIMES_${T}_CMAKE_EXE_LINKER_FLAGS="-fuse-ld=lld" \
@@ -89,6 +95,11 @@ step_llvm() {
   # C++ 运行库补进 sysroot
   cp -a "$BUILD"/lib/"$T"/libc++*   "$SYSROOT/lib/" 2>/dev/null || true
   cp -a "$BUILD"/lib/"$T"/libunwind* "$SYSROOT/lib/" 2>/dev/null || true
+
+  # 若为纯静态模式，清理可能残留的目标端共享库
+  if [ "${ENABLE_SHARED:-OFF}" = "OFF" ]; then
+    rm -f "$SYSROOT"/lib/libc++.so* "$SYSROOT"/lib/libc++abi.so* "$SYSROOT"/lib/libunwind.so* "$SYSROOT"/lib/libc.so* "$SYSROOT"/lib/"$LD_MUSL_SO" 2>/dev/null || true
+  fi
   mark llvm
   ok "安装完成"
 }

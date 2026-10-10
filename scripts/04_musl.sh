@@ -27,6 +27,13 @@ step_musl() {
   local BUILTIN_LIB="$BOOT/$LLVM_PREBUILT/lib/clang/18/lib/linux/$RT_BUILTIN_NAME"
   [ -f "$BUILTIN_LIB" ] || die "缺少 compiler-rt builtins 库: $BUILTIN_LIB"
 
+  local musl_shared_flags=()
+  if [ "${ENABLE_SHARED:-OFF}" = "ON" ]; then
+    musl_shared_flags=("--enable-shared")
+  else
+    musl_shared_flags=("--disable-shared")
+  fi
+
   CC="$BOOT/bin/clang --target=$T -fuse-ld=lld" \
   LIBCC="$BUILTIN_LIB" \
   ./configure \
@@ -34,18 +41,27 @@ step_musl() {
       --prefix=/usr \
       --syslibdir=/lib \
       --disable-gcc-wrapper \
+      --enable-static \
+      "${musl_shared_flags[@]}" \
       LIBCC="$BUILTIN_LIB"
 
   make -j"$JOBS" LIBCC="$BUILTIN_LIB"
   make DESTDIR="$SYSROOT" install
 
-  # 修复 musl 默认创建的绝对路径软链接（/usr/lib/libc.so 在宿主机上为悬空链接）为相对链接
-  ln -sf ../usr/lib/libc.so "$SYSROOT/lib/$LD_MUSL_SO"
+  if [ "${ENABLE_SHARED:-OFF}" = "ON" ]; then
+    # 修复 musl 默认创建的绝对路径软链接（/usr/lib/libc.so 在宿主机上为悬空链接）为相对链接
+    ln -sf ../usr/lib/libc.so "$SYSROOT/lib/$LD_MUSL_SO"
+  fi
 
   # 补内核头文件（musl 的 --with-headers 是无效选项，会被静默忽略）
   cp -a "$SRC/linux-headers/include/." "$SYSROOT/usr/include/"
 
-  for f in "lib/$LD_MUSL_SO" usr/lib/libc.a usr/lib/crt1.o usr/include/stdio.h; do
+  local check_files=(usr/lib/libc.a usr/lib/crt1.o usr/include/stdio.h)
+  if [ "${ENABLE_SHARED:-OFF}" = "ON" ]; then
+    check_files=("lib/$LD_MUSL_SO" "${check_files[@]}")
+  fi
+
+  for f in "${check_files[@]}"; do
     [ -e "$SYSROOT/$f" ] || [ -L "$SYSROOT/$f" ] || die "musl 安装不完整，缺少 $f"
   done
   mark musl

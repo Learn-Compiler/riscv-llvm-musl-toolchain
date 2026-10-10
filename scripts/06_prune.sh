@@ -95,6 +95,10 @@ step_prune() {
 -stdlib=libc++
 EOF
 
+  if [ "${DEFAULT_STATIC_LINK:-ON}" = "ON" ]; then
+    echo "-static" >> "$INSTALL/bin/${T}.cfg"
+  fi
+
   mark prune
   ok "工具链精简与 .cfg 配置完成"
 }

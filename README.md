@@ -8,11 +8,12 @@
 ## 🌟 项目特性
 
 - **100% 纯 LLVM 生态闭环**：彻底摒弃 GCC、GNU Binutils 和 `libgcc`，所有底座运行时由 `compiler-rt builtins` 和 `libc++` 提供。
+- **默认纯静态库与自包含链接**：Musl libc、libc++、libc++abi、libunwind 目标运行时默认仅构建静态库（`.a`），且内置配置文件默认启用 `-static`，直接生成完全自包含的静态 ELF 二进制，杜绝动态加载器依赖。
 - **免 root 宿主自举**：全自动准备独立的 Clang、CMake、Ninja 与必要依赖，不依赖宿主机系统全局开发环境，不污染宿主系统。
 - **专为二次开发设计**：支持通过 `LLVM_SRC` 环境变量直接挂载本地自研/二次开发的 LLVM 源码树，支持微调自研指令、调度模型与优化 Pass 并快速迭代。
 - **全方位调试模式支持**：提供 `--debug` (RelWithDebInfo + Assertions) 与 `--full-debug` (Debug -O0) 一键切换，智能保留调试符号，支持 GDB/LLDB 源码级调试与 TableGen 编译加速。
 - **工业级瘦身与裁剪**：自动剔除 Windows、macOS、GPU Offload、Python 静态分析等数十个无关跨平台冗余组件，执行宿主符号剥离（Strip），体积减少 >60%（离线发布包仅 ~100MB）。
-- **即开即用（Relocatable & Zero-flags）**：内置 `riscv64-unknown-linux-musl.cfg` 便携配置文件与 15 个标准三元组软链接，无需输入长串 `--target` 和 `--sysroot` 参数。
+- **即开即用（Relocatable & Zero-flags）**：内置 `riscv64-unknown-linux-musl.cfg` 便携配置文件与 15 个标准三元组软链接，无需输入长串 `--target`、`--sysroot` 与 `-static` 参数。
 
 ---
 
@@ -23,49 +24,40 @@
 ```bash
 ./build.sh
 ```
-构建完成后，工具链将生成在 `install-clang-musl/` 目录下。
+构建完成后，工具链将生成在 `install-clang-musl/` 目录下（默认纯静态库体系与默认静态链接）。
 
-### 2. 常用构建选项
+### 2. 常用构建选项与组合
+
+工具链支持自由组合标志（如 `--step llvm --debug`、`--step musl --release --share` 等），**默认未指定库类型时编译纯静态库，显式指定 `--shared` 或 `--share` 时才编译动态库**：
+
 ```bash
-# 构建完成后自动打包为 .tar.zst 离线发布包
-./build.sh --package
+# 1. 基础与模式构建
+./build.sh                     # 默认标准构建 (Release + 纯静态库 + 默认静态链接)
+./build.sh --default           # 显式重置并按默认标准配置构建
+./build.sh --release           # 显式以 Release 优化模式构建
+./build.sh --debug             # 开启推荐二次开发调试模式 (RelWithDebInfo + Assertions + 保留符号)
+./build.sh --full-debug        # 开启纯单步调试模式 (Debug -O0 -g + Assertions + 保留符号)
 
-# 仅拉取源码（llvm 与 musl）
-./build.sh --fetch
+# 2. 静态库与共享库控制 (默认纯静态库)
+./build.sh --shared            # 构建目标共享库 (.so) 与静态库 (.a)（亦支持 --share）
+./build.sh --static            # 显式指定仅构建目标静态库 (.a)（默认行为）
+./build.sh --no-static-link    # 静态库模式下不默认向 .cfg 追加 -static (亦支持 --no-default-static)
 
-# 仅重新编译 LLVM 模块（二次开发高频迭代时使用，跳过 builtins/musl 重复构建）
-./build.sh --rebuild-llvm
+# 3. 单步独立调试与参数自由组合 (核心特性)
+./build.sh --step llvm --debug           # 以调试模式单独重编 LLVM 模块
+./build.sh --step musl --release --share # 以 Release 模式单独为 musl 编译共享库 (.so)
+./build.sh --step verify                 # 单独运行产物校验与冒烟测试
+./build.sh --rebuild-llvm --debug        # 重编 LLVM 及运行库并开启调试模式
 
-# 开启推荐二次开发调试模式（RelWithDebInfo + Assertions + 保留符号）
-./build.sh --debug
-
-# 开启纯单步调试模式（Debug -O0 -g + Assertions + 保留符号）
-./build.sh --full-debug
-
-# 任意模式下显式开启 LLVM 断言（精确定位 Pass 与 ISel 崩溃）
-./build.sh --assertions
-
-# 自由指定 CMake 构建类型 (Release | RelWithDebInfo | Debug)
-./build.sh --build-type RelWithDebInfo
-
-# 显式禁止剥离调试符号（保留所有 .debug_* 段）
-./build.sh --no-strip
-
-# 单步独立调试执行（支持: bootstrap, fetch, builtins, musl, llvm, prune, verify, package）
-./build.sh --step musl
-./build.sh --step verify
-
-# 从指定阶段开始向下连续执行（例如跳过 fetch 直接从 builtins 开始）
-./build.sh --from llvm
-
-# 指定目标平台配置（默认使用 config/targets/riscv64-linux-musl.env）
-./build.sh --target riscv64-linux-musl
-
-# 清理所有构建缓存与时间戳
-./build.sh --clean
-
-# 控制构建并行度（默认 JOBS=6）
-JOBS=8 ./build.sh
+# 4. 流水线控制与维护
+./build.sh --from llvm         # 从 llvm 阶段开始向下连续执行至 verify
+./build.sh --package           # 构建完成后自动打包为 .tar.zst 离线发布包
+./build.sh --fetch             # 仅准备自举工具并拉取/挂载源码
+./build.sh --clean             # 清理编译临时目录与时间戳（保留 .bootstrap）
+./build.sh --clean-all         # 清理所有内容（包括 .bootstrap 引导环境）
+./build.sh --target riscv64-linux-musl # 指定目标平台配置
+JOBS=8 ./build.sh              # 控制并行编译核心数 (默认 6)
+```
 ```
 
 ---
@@ -74,12 +66,19 @@ JOBS=8 ./build.sh
 
 本工具链构建系统采用**构建编排（Builder）与 LLVM 源码完全解耦**的架构，便于长期的芯片定制开发与上游版本升级。
 
-### 1. 使用本地自研/定制 LLVM 源码构建
-如果您在本地维护了包含自研指令集（Custom Extension）或修改过的 LLVM 源码库：
+### 1. 使用本地自研/定制源码构建 (LLVM / Compiler-RT / Musl)
+如果您在本地维护了包含自研指令集（Custom Extension）、底层运行时 builtins 或 C 库的定制源码：
 ```bash
-LLVM_SRC=/path/to/your/custom-llvm-project ./build.sh
+# 挂载本地自研 LLVM 源码 (内含 compiler-rt)
+LLVM_SRC=/path/to/your/custom-llvm ./build.sh
+
+# 挂载本地自研 Musl 源码
+MUSL_SRC=/path/to/your/custom-musl ./build.sh
+
+# 同时挂载自研源码并以调试模式重编 musl / llvm
+MUSL_SRC=/path/to/musl LLVM_SRC=/path/to/llvm ./build.sh --debug
 ```
-`build.sh` 会自动检测并挂载您的本地 LLVM 源码树进行编译，产出包含您自定义特性的专属工具链。
+`build.sh` 会自动检测并挂载对应的源码树进行编译，产出包含您自定义特性的专属工具链。
 
 ### 2. 日常二次开发与调试模式（Debug / RelWithDebInfo / Assertions）
 
@@ -117,6 +116,8 @@ LLVM_SRC="/path/to/my-llvm"     # 挂载本地自研源码
 BUILD_TYPE="RelWithDebInfo"     # 调试模式
 ENABLE_ASSERTIONS="ON"          # 开启断言抓 Bug
 STRIP_SYMBOLS="OFF"             # 保留调试符号
+ENABLE_SHARED="OFF"             # 仅编译目标静态库 (默认 OFF)
+DEFAULT_STATIC_LINK="ON"        # 默认静态链接模式 (默认 ON)
 ```
 
 #### 使用 GDB 源码级调试 Clang 编译器：
@@ -146,24 +147,19 @@ gdb --args install-clang-musl/bin/riscv64-unknown-linux-musl-clang -O2 test.c
 
 ## 💻 工具链使用示例
 
-把工具链 `bin` 目录加入环境变量，或直接绝对路径调用：
+把工具链 `bin` 目录加入环境变量，或直接绝对路径调用。**由于已默认启用静态库与静态链接，无需再手动添加 `-static`**：
 
-### 1. 编译 C 语言程序
+### 1. 编译 C 语言程序（默认产出纯静态 ELF 二进制）
 ```bash
 riscv64-unknown-linux-musl-clang hello.c -o hello
 ```
 
-### 2. 编译 C++ 语言程序
+### 2. 编译 C++ 语言程序（默认静态链接 libc++ 与 libunwind）
 ```bash
 riscv64-unknown-linux-musl-clang++ main.cpp -o main
 ```
 
-### 3. 静态编译完全自包含二进制
-```bash
-riscv64-unknown-linux-musl-clang -static hello.c -o hello-static
-```
-
-### 4. 启用 RISC-V 向量扩展（RVV / Vector）
+### 3. 启用 RISC-V 向量扩展（RVV / Vector）
 ```bash
 riscv64-unknown-linux-musl-clang -march=rv64gcv rvv_app.c -o rvv_app
 ```
@@ -182,17 +178,17 @@ riscv-llvm-musl-toolchain/
 │   └── targets/                  # 目标平台配置目录
 │       └── riscv64-linux-musl.env# RISC-V 64 Musl 专属平台参数
 │
-├── third_party/                  # 【第三方子模组】Git Submodules
-│   ├── llvm/                     # LLVM 项目源码 (Git Submodule @ release/20.x)
+├── third_party/                  # 【第三方源码组件】
+│   ├── llvm/                     # LLVM 项目源码 (Git Submodule @ release/20.x，内含 compiler-rt)
 │   └── musl/                     # Musl C 库源码 (Git Submodule @ master)
 │
 ├── scripts/                      # 【执行层】模块化独立步骤流水线
 │   ├── common.sh                 # 公共基础设施（日志、时间戳打标、断点续传下载、Git 克隆）
 │   ├── 01_bootstrap.sh           # 阶段 1：免 root 准备引导工具 & 探测宿主 C++
 │   ├── 02_fetch.sh               # 阶段 2：准备源码 (Submodule 更新或挂载本地源码) 并自动应用补丁
-│   ├── 03_builtins.sh            # 阶段 3：安装 Musl 基础头文件并编译 compiler-rt builtins
+│   ├── 03_builtins.sh            # 阶段 3：安装 Musl 基础头文件并独立构建 compiler-rt builtins 与 crt
 │   ├── 04_musl.sh                # 阶段 4：配置并构建 Musl libc 并安装至 Sysroot
-│   ├── 05_llvm.sh                # 阶段 5：全量编译 LLVM/Clang 及全部运行时
+│   ├── 05_llvm.sh                # 阶段 5：全量编译 LLVM/Clang 及全部运行时 (libc++/libunwind)
 │   ├── 06_prune.sh               # 阶段 6：精简裁剪、Strip、三元组软链接与生成 .cfg 配置文件
 │   ├── 07_verify.sh              # 阶段 7：构建产物验证与 C/C++ 冒烟测试
 │   └── 08_package.sh             # 阶段 8：打包发布 (tar.zst) 与计算 SHA256 校验和

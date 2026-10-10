@@ -9,6 +9,36 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/common.sh"
 init_config
 
+# 验证目标运行库（静态库/共享库）
+verify_runtime_libs() {
+  # --- 目标静态运行库检查 ---
+  [ -f "$SYSROOT/usr/lib/libc.a" ] || die "缺少静态 C 运行库: $SYSROOT/usr/lib/libc.a"
+  ok "找到静态 libc.a"
+
+  if [ -f "$SYSROOT/lib/libc++.a" ] || [ -f "$SYSROOT/usr/lib/libc++.a" ]; then
+    ok "找到静态 libc++.a"
+  else
+    die "缺少静态 C++ 运行库 libc++.a"
+  fi
+
+  if [ -f "$SYSROOT/lib/libunwind.a" ] || [ -f "$SYSROOT/usr/lib/libunwind.a" ]; then
+    ok "找到静态 libunwind.a"
+  else
+    die "缺少静态 unwinder 运行库 libunwind.a"
+  fi
+
+  if [ "${ENABLE_SHARED:-OFF}" = "OFF" ]; then
+    if ls "$SYSROOT"/lib/*.so* "$SYSROOT"/usr/lib/*.so* >/dev/null 2>&1; then
+      warn "Sysroot 中存在 .so 共享库文件（如不需要共享库请核实）"
+    else
+      ok "确认 Sysroot 纯静态化（无 .so 共享库）"
+    fi
+  else
+    [ -e "$SYSROOT/lib/$LD_MUSL_SO" ] || [ -e "$SYSROOT/usr/lib/libc.so" ] || die "共享库模式下缺少动态链接器/libc.so"
+    ok "确认 Sysroot 包含共享库支持 ($LD_MUSL_SO)"
+  fi
+}
+
 step_verify() {
   log "5/5 验证"
 
@@ -34,6 +64,9 @@ step_verify() {
   tri=$("$INSTALL/bin/clang" --print-target-triple --target="$T" 2>/dev/null || true)
   echo "  target triple: $tri"
 
+  # --- 校验目标运行库（静态库/共享库） ---
+  verify_runtime_libs
+
   # --- 冒烟测试：C ---
   local wd="$BUILD/smoke"
   mkdir -p "$wd"
@@ -42,11 +75,21 @@ step_verify() {
 #include <stdlib.h>
 int main(void){ printf("hello from %s\n", "musl+clang"); return 0; }
 EOF
-  "$INSTALL/bin/clang" --target="$T" --sysroot="$SYSROOT" \
+  local c_static_flag=""
+  if [ "${ENABLE_SHARED:-OFF}" = "OFF" ] || [ "${DEFAULT_STATIC_LINK:-ON}" = "ON" ]; then
+    c_static_flag="-static"
+  fi
+  "$INSTALL/bin/clang" --target="$T" --sysroot="$SYSROOT" $c_static_flag \
       "$wd/hello.c" -o "$wd/hello"
   file "$wd/hello" | grep -q "${SMOKE_TEST_PATTERN:-UCB RISC-V}" \
     || die "C 冒烟测试产物不是目标架构 (${SMOKE_TEST_PATTERN:-UCB RISC-V})"
-  ok "C 链接成功（且未依赖 libgcc）"
+  if [ -n "$c_static_flag" ]; then
+    file "$wd/hello" | grep -q "statically linked" \
+      || die "C 冒烟测试产物不是静态链接"
+    ok "C 静态链接成功（且未依赖 libgcc）"
+  else
+    ok "C 动态链接成功"
+  fi
 
   # --- 冒烟测试：C++ / libc++ ---
   cat > "$wd/h.cpp" <<'EOF'
@@ -55,18 +98,43 @@ EOF
 #include <string>
 int main(){ std::vector<std::string> v{"ok"}; std::cout << v[0] << "\n"; }
 EOF
-  "$INSTALL/bin/clang++" --target="$T" --sysroot="$SYSROOT" -stdlib=libc++ \
+  "$INSTALL/bin/clang++" --target="$T" --sysroot="$SYSROOT" -stdlib=libc++ $c_static_flag \
       "$wd/h.cpp" -o "$wd/h"
   file "$wd/h" | grep -q "${SMOKE_TEST_PATTERN:-UCB RISC-V}" \
     || die "C++ 冒烟测试产物不是目标架构 (${SMOKE_TEST_PATTERN:-UCB RISC-V})"
-  ok "C++/libc++ 链接成功"
+  if [ -n "$c_static_flag" ]; then
+    file "$wd/h" | grep -q "statically linked" \
+      || die "C++ 冒烟测试产物不是静态链接"
+    ok "C++/libc++ 静态链接成功"
+  else
+    ok "C++/libc++ 动态链接成功"
+  fi
 
   # --- 冒烟测试：三元组别名与 .cfg 免参数编译 ---
   if [ -x "$INSTALL/bin/${T}-clang" ]; then
     "$INSTALL/bin/${T}-clang" "$wd/hello.c" -o "$wd/hello-cfg"
     file "$wd/hello-cfg" | grep -q "${SMOKE_TEST_PATTERN:-UCB RISC-V}" \
       || die "三元组前缀 clang 编译测试失败"
-    ok "三元组别名 ${T}-clang (.cfg 自动装载) 编译成功"
+    if [ "${DEFAULT_STATIC_LINK:-ON}" = "ON" ]; then
+      file "$wd/hello-cfg" | grep -q "statically linked" \
+        || die "三元组别名 ${T}-clang 未默认静态链接"
+      ok "三元组别名 ${T}-clang (.cfg 自动装载) 默认静态链接成功"
+    else
+      ok "三元组别名 ${T}-clang (.cfg 自动装载) 编译成功"
+    fi
+  fi
+
+  if [ -x "$INSTALL/bin/${T}-clang++" ]; then
+    "$INSTALL/bin/${T}-clang++" "$wd/h.cpp" -o "$wd/h-cfg"
+    file "$wd/h-cfg" | grep -q "${SMOKE_TEST_PATTERN:-UCB RISC-V}" \
+      || die "三元组前缀 clang++ 编译测试失败"
+    if [ "${DEFAULT_STATIC_LINK:-ON}" = "ON" ]; then
+      file "$wd/h-cfg" | grep -q "statically linked" \
+        || die "三元组别名 ${T}-clang++ 未默认静态链接"
+      ok "三元组别名 ${T}-clang++ (.cfg 自动装载) 默认静态链接成功"
+    else
+      ok "三元组别名 ${T}-clang++ (.cfg 自动装载) 编译成功"
+    fi
   fi
 
   mark verify

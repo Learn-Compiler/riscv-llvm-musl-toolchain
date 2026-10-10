@@ -18,36 +18,56 @@ source "$SRC/scripts/common.sh"
 show_help() {
   cat <<'EOF'
 用法:
-  ./build.sh [选项]
+  ./build.sh [选项...]
 
-常用构建选项:
-  ./build.sh                     完整构建流程（自举 -> 源码 -> builtins -> musl -> llvm -> prune -> verify）
+构建模式选择:
+  ./build.sh                     完整构建（默认：Release 模式，纯静态库，默认静态链接）
+  ./build.sh --default           恢复/强制默认标准构建（Release + 静态库 + 默认静态链接）
+  ./build.sh --release           发布优化模式 (Release -O3 + 剥离符号)
+  ./build.sh --debug             二次开发推荐调试模式 (RelWithDebInfo -O2 -g + Assertions + 保留符号)
+  ./build.sh --full-debug        单步源码级纯调试模式 (Debug -O0 -g + Assertions + 保留符号)
+  ./build.sh --build-type <TYPE> 自定义 CMake 构建模式 (Release|RelWithDebInfo|Debug|MinSizeRel)
+
+库类型与链接模式 (默认未指定为静态库，指定后为动态库):
+  ./build.sh --shared, --share   编译目标共享库 (.so) 与静态库 (.a)，工具链默认动态链接
+  ./build.sh --static            显式指定仅编译目标静态库 (.a)（默认行为）
+  ./build.sh --static-link       工具链 .cfg 配置文件中默认追加 -static 静态链接 (静态库下默认开启)
+  ./build.sh --no-static-link    工具链 .cfg 配置文件中不默认追加 -static (亦支持 --no-default-static)
+
+辅助调试与控制开关:
+  ./build.sh --assertions        显式开启 LLVM 断言 (精确定位 Pass 与 ISel 崩溃)
+  ./build.sh --no-assertions     显式关闭 LLVM 断言
+  ./build.sh --strip             强制剥离宿主程序符号 (Strip)
+  ./build.sh --no-strip          保留宿主程序与库调试符号
+
+模块流水线与维护选项:
+  ./build.sh --step <步骤名>     单独执行某一特定步骤 (可多次指定，如 --step musl --step llvm)
+  ./build.sh --from <步骤名>     从指定步骤开始向下连续执行
+  ./build.sh --rebuild-llvm      重新编译 LLVM 模块与运行库（二次开发常用）
   ./build.sh --fetch             仅准备自举工具并拉取源码
   ./build.sh --package           构建完成后打包生成 .tar.zst 离线发布包
-  ./build.sh --rebuild-llvm      重新编译 LLVM 模块与运行库（二次开发常用）
-  ./build.sh --debug             二次开发调试模式 (RelWithDebInfo + Assertions + 保留符号)
-  ./build.sh --full-debug        完整调试模式 (Debug -O0 + Assertions + 保留符号)
-  ./build.sh --assertions        单独开启 LLVM 断言 (精确定位 Pass 与 ISel 崩溃)
-  ./build.sh --build-type <TYPE> 指定 CMake 构建模式 (Release|RelWithDebInfo|Debug)
-  ./build.sh --no-strip          保留宿主二进制与共享库调试符号
   ./build.sh --clean             清理编译临时目录与时间戳（保留 .bootstrap）
   ./build.sh --clean-all         清理所有内容（包括 .bootstrap 引导工具）
-
-高级调试与拓展选项:
-  ./build.sh --step <步骤名>     单独执行某一特定步骤
-  ./build.sh --from <步骤名>     从指定步骤开始向下连续执行
   ./build.sh --target <目标名>   指定目标平台配置 (对应 config/targets/<目标名>.env)
   JOBS=8 ./build.sh              指定并行构建核心数 (默认 6)
 
 可选步骤名列表:
-  bootstrap  - 准备免 root 引导工具并探测宿主 C++
-  fetch      - 拉取源码或挂载本地自研源码
-  builtins   - 安装 musl 基础头文件并编译 compiler-rt builtins
-  musl       - 编译 Musl libc 并安装至 Sysroot
-  llvm       - 编译 LLVM/Clang 及全部运行时 (compiler-rt/libc++/libunwind)
-  prune      - 精简无用跨平台工具、剥离符号、生成三元组链接与 .cfg
-  verify     - 工具链运行库检查与 C/C++ 冒烟测试
-  package    - 离线打包生成 .tar.zst 与 SHA256 校验和
+  bootstrap   - 准备免 root 引导工具并探测宿主 C++
+  fetch       - 拉取源码或挂载本地自研源码 (llvm, musl)
+  builtins    - 编译 compiler-rt builtins 与 crt (亦支持别名 --step compiler-rt)
+  musl        - 编译 Musl libc 并安装至 Sysroot
+  llvm        - 编译 LLVM/Clang 及全部运行时 (libc++/libunwind)
+  prune       - 精简无用跨平台工具、剥离符号、生成三元组链接与 .cfg
+  verify      - 工具链运行库检查与 C/C++ 冒烟测试
+  package     - 离线打包生成 .tar.zst 与 SHA256 校验和
+
+常用组合示例:
+  ./build.sh --default
+  ./build.sh --release
+  ./build.sh --debug
+  ./build.sh --shared
+  ./build.sh --step llvm --debug
+  ./build.sh --step musl --release --share
 EOF
   exit 0
 }
@@ -56,27 +76,29 @@ EOF
 ONLY_FETCH=0
 DO_PACKAGE=0
 REBUILD_LLVM=0
-SELECTED_STEP=""
+SELECTED_STEPS=()
 START_FROM=""
 CLI_BUILD_TYPE=""
 CLI_ASSERTIONS=""
 CLI_STRIP_SYMBOLS=""
+CLI_ENABLE_SHARED=""
+CLI_DEFAULT_STATIC_LINK=""
 
 while [ $# -gt 0 ]; do
   case "$1" in
     -h|--help)
       show_help
       ;;
-    --fetch)
-      ONLY_FETCH=1
+    --default)
+      CLI_BUILD_TYPE="Release"
+      CLI_ASSERTIONS="OFF"
+      CLI_STRIP_SYMBOLS="AUTO"
+      CLI_ENABLE_SHARED="OFF"
+      CLI_DEFAULT_STATIC_LINK="ON"
       shift
       ;;
-    --package)
-      DO_PACKAGE=1
-      shift
-      ;;
-    --rebuild-llvm)
-      REBUILD_LLVM=1
+    --release|--realse)
+      CLI_BUILD_TYPE="Release"
       shift
       ;;
     --debug)
@@ -95,18 +117,54 @@ while [ $# -gt 0 ]; do
       CLI_ASSERTIONS="ON"
       shift
       ;;
+    --no-assertions)
+      CLI_ASSERTIONS="OFF"
+      shift
+      ;;
     --build-type)
-      [ -n "${2:-}" ] || die "--build-type 需要指定模式 (Release|RelWithDebInfo|Debug)"
+      [ -n "${2:-}" ] || die "--build-type 需要指定模式 (Release|RelWithDebInfo|Debug|MinSizeRel)"
       CLI_BUILD_TYPE="$2"
       shift 2
+      ;;
+    --strip)
+      CLI_STRIP_SYMBOLS="ON"
+      shift
       ;;
     --no-strip)
       CLI_STRIP_SYMBOLS="OFF"
       shift
       ;;
+    --shared|--share)
+      CLI_ENABLE_SHARED="ON"
+      shift
+      ;;
+    --static)
+      CLI_ENABLE_SHARED="OFF"
+      shift
+      ;;
+    --static-link)
+      CLI_DEFAULT_STATIC_LINK="ON"
+      shift
+      ;;
+    --no-static-link|--no-default-static)
+      CLI_DEFAULT_STATIC_LINK="OFF"
+      shift
+      ;;
+    --fetch)
+      ONLY_FETCH=1
+      shift
+      ;;
+    --package)
+      DO_PACKAGE=1
+      shift
+      ;;
+    --rebuild-llvm)
+      REBUILD_LLVM=1
+      shift
+      ;;
     --step)
       [ -n "${2:-}" ] || die "--step 需要指定步骤名称"
-      SELECTED_STEP="$2"
+      SELECTED_STEPS+=("$2")
       shift 2
       ;;
     --from)
@@ -139,9 +197,16 @@ done
 
 # 初始化基础配置与目标平台
 init_config
-[ -n "$CLI_BUILD_TYPE" ]     && BUILD_TYPE="$CLI_BUILD_TYPE"
-[ -n "$CLI_ASSERTIONS" ]     && ENABLE_ASSERTIONS="$CLI_ASSERTIONS"
-[ -n "$CLI_STRIP_SYMBOLS" ]  && STRIP_SYMBOLS="$CLI_STRIP_SYMBOLS"
+[ -n "$CLI_BUILD_TYPE" ]          && BUILD_TYPE="$CLI_BUILD_TYPE"
+[ -n "$CLI_ASSERTIONS" ]          && ENABLE_ASSERTIONS="$CLI_ASSERTIONS"
+[ -n "$CLI_STRIP_SYMBOLS" ]       && STRIP_SYMBOLS="$CLI_STRIP_SYMBOLS"
+[ -n "$CLI_ENABLE_SHARED" ]       && ENABLE_SHARED="$CLI_ENABLE_SHARED"
+[ -n "$CLI_DEFAULT_STATIC_LINK" ] && DEFAULT_STATIC_LINK="$CLI_DEFAULT_STATIC_LINK"
+
+# 默认规则：若指定了动态库(ENABLE_SHARED=ON)且未显式指定静态链接，则默认动态链接
+if [ "$ENABLE_SHARED" = "ON" ] && [ -z "$CLI_DEFAULT_STATIC_LINK" ]; then
+  DEFAULT_STATIC_LINK="OFF"
+fi
 
 # ─── 前置检查 ────────────────────────────────────────────────────────────
 [ -d "$SRC/linux-headers/include" ] || die "缺少 $SRC/linux-headers/include"
@@ -149,7 +214,7 @@ command -v curl >/dev/null || die "缺少 curl"
 command -v tar  >/dev/null || die "缺少 tar"
 
 printf '%s%s 无 GCC 工具链构建%s\n' "$c_hd" "$TARGET_TRIPLE" "$c_off"
-printf '  SRC     = %s\n  INSTALL = %s\n  JOBS    = %s\n  BUILD   = %s (Assertions: %s, Strip: %s)\n' "$SRC" "$INSTALL" "$JOBS" "$BUILD_TYPE" "$ENABLE_ASSERTIONS" "$STRIP_SYMBOLS"
+printf '  SRC     = %s\n  INSTALL = %s\n  JOBS    = %s\n  BUILD   = %s (Assertions: %s, Strip: %s, Shared: %s, DefaultStatic: %s)\n' "$SRC" "$INSTALL" "$JOBS" "$BUILD_TYPE" "$ENABLE_ASSERTIONS" "$STRIP_SYMBOLS" "$ENABLE_SHARED" "$DEFAULT_STATIC_LINK"
 
 # 引入所有步骤模块
 # shellcheck disable=SC1091
@@ -179,7 +244,7 @@ run_step() {
     fetch)
       step_fetch
       ;;
-    builtins)
+    builtins|compiler-rt|compiler_rt)
       step_builtins
       ;;
     musl)
@@ -203,11 +268,15 @@ run_step() {
   esac
 }
 
-# 单独步骤执行模式
-if [ -n "$SELECTED_STEP" ]; then
-  log "单独执行步骤: $SELECTED_STEP"
-  run_step "$SELECTED_STEP"
-  ok "步骤 $SELECTED_STEP 执行完毕"
+# 单独步骤执行模式（支持单个或按序指定多个步骤，如 --step musl --step llvm）
+if [ ${#SELECTED_STEPS[@]} -gt 0 ]; then
+  for step in "${SELECTED_STEPS[@]}"; do
+    [ "$step" = "compiler-rt" ] || [ "$step" = "compiler_rt" ] && step="builtins"
+    unmark "$step"
+    log "单独执行步骤: $step"
+    run_step "$step"
+    ok "步骤 $step 执行完毕"
+  done
   exit 0
 fi
 
@@ -226,6 +295,7 @@ if [ "$ONLY_FETCH" = 1 ]; then
 fi
 
 should_run=0
+[ "$START_FROM" = "compiler-rt" ] || [ "$START_FROM" = "compiler_rt" ] && START_FROM="builtins"
 [ -z "$START_FROM" ] && should_run=1
 
 for st in "${PIPELINE[@]}"; do
