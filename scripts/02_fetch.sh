@@ -45,12 +45,32 @@ step_fetch() {
     mkdir -p "$(dirname "$LLVM_DIR")"
     ln -sfn "$LLVM_SRC" "$LLVM_DIR"
   else
-    if [ ! -f "$LLVM_DIR/llvm/CMakeLists.txt" ]; then
+    if [ ! -d "$LLVM_DIR/.git" ] && [ ! -f "$LLVM_DIR/.git" ]; then
       echo "  初始化并检出 llvm 子模组 ..."
       git -C "$SRC" submodule update --init --depth 1 third_party/llvm || \
         git -C "$SRC" submodule update --init third_party/llvm
     fi
-    ok "llvm 子模组已就绪 ($(git -C "$LLVM_DIR" rev-parse --short HEAD 2>/dev/null || echo 'local'))"
+
+    # 若指定了自定义版本，执行版本切换
+    if [ -n "${LLVM_VERSION:-}" ]; then
+      local llvm_target_ref="$LLVM_VERSION"
+      if [[ "$llvm_target_ref" =~ ^[0-9]+$ ]]; then
+        llvm_target_ref="release/${llvm_target_ref}.x"
+      elif [[ "$llvm_target_ref" =~ ^[0-9]+\.[0-9]+(\.[0-9]+)?$ ]]; then
+        llvm_target_ref="llvmorg-${llvm_target_ref}"
+      fi
+      log "检出 LLVM 指定版本/分支: $llvm_target_ref (源参数: $LLVM_VERSION)"
+      if ! git -C "$LLVM_DIR" checkout -q -f "$llvm_target_ref" 2>/dev/null; then
+        echo "  本地未找到 $llvm_target_ref，正在向上游拉取 ..."
+        git -C "$LLVM_DIR" fetch --depth 1 origin "$llvm_target_ref" 2>/dev/null || \
+          git -C "$LLVM_DIR" fetch origin "$llvm_target_ref" 2>/dev/null || \
+          git -C "$LLVM_DIR" fetch --tags --depth 1 origin 2>/dev/null || true
+        git -C "$LLVM_DIR" checkout -q -f "$llvm_target_ref" 2>/dev/null || \
+          git -C "$LLVM_DIR" checkout -q -f "FETCH_HEAD" 2>/dev/null || \
+          die "切换 LLVM 至 $llvm_target_ref 失败"
+      fi
+    fi
+    ok "llvm 源码已就绪 ($(git -C "$LLVM_DIR" rev-parse --short HEAD 2>/dev/null || echo 'local'))"
   fi
 
   # ---- 2. 准备 Musl 源码 ----
@@ -60,12 +80,30 @@ step_fetch() {
     mkdir -p "$(dirname "$MUSL_DIR")"
     ln -sfn "$MUSL_SRC" "$MUSL_DIR"
   else
-    if [ ! -f "$MUSL_DIR/configure" ]; then
+    if [ ! -d "$MUSL_DIR/.git" ] && [ ! -f "$MUSL_DIR/.git" ]; then
       echo "  初始化并检出 musl 子模组 ..."
       git -C "$SRC" submodule update --init --depth 1 third_party/musl || \
         git -C "$SRC" submodule update --init third_party/musl
     fi
-    ok "musl 子模组已就绪 ($(git -C "$MUSL_DIR" rev-parse --short HEAD 2>/dev/null || echo 'local'))"
+
+    # 若指定了自定义版本，执行版本切换
+    if [ -n "${MUSL_VERSION:-}" ]; then
+      local musl_target_ref="$MUSL_VERSION"
+      if [[ "$musl_target_ref" =~ ^[0-9]+\.[0-9]+(\.[0-9]+)?$ ]]; then
+        musl_target_ref="v${musl_target_ref}"
+      fi
+      log "检出 Musl 指定版本/分支: $musl_target_ref (源参数: $MUSL_VERSION)"
+      if ! git -C "$MUSL_DIR" checkout -q -f "$musl_target_ref" 2>/dev/null; then
+        echo "  本地未找到 $musl_target_ref，正在向上游拉取 ..."
+        git -C "$MUSL_DIR" fetch --depth 1 origin "$musl_target_ref" 2>/dev/null || \
+          git -C "$MUSL_DIR" fetch origin "$musl_target_ref" 2>/dev/null || \
+          git -C "$MUSL_DIR" fetch --tags --depth 1 origin 2>/dev/null || true
+        git -C "$MUSL_DIR" checkout -q -f "$musl_target_ref" 2>/dev/null || \
+          git -C "$MUSL_DIR" checkout -q -f "FETCH_HEAD" 2>/dev/null || \
+          die "切换 Musl 至 $musl_target_ref 失败"
+      fi
+    fi
+    ok "musl 源码已就绪 ($(git -C "$MUSL_DIR" rev-parse --short HEAD 2>/dev/null || echo 'local'))"
   fi
 
   # ---- 3. 应用拓展补丁 ----

@@ -43,21 +43,25 @@
 ./build.sh --static            # 显式指定仅构建目标静态库 (.a)（默认行为）
 ./build.sh --no-static-link    # 静态库模式下不默认向 .cfg 追加 -static (亦支持 --no-default-static)
 
-# 3. 单步独立调试与参数自由组合 (核心特性)
+# 3. 自定义库版本与自研源码自由组合 (核心特性)
+./build.sh --llvm-version 19                   # 自动检出 LLVM 19 (release/19.x)
+./build.sh --llvm-version release/19.x --debug # 指定 LLVM 19 分支并开启调试模式
+./build.sh --musl-version 1.2.5                # 自动检出 Musl v1.2.5
+./build.sh --llvm-src /path/to/custom-llvm     # 命令行直接挂载本地自研 LLVM 源码
+./build.sh --musl-src /path/to/custom-musl     # 命令行直接挂载本地自研 Musl 源码
+./build.sh --llvm-version 19 --musl-version 1.2.5 --debug # 任意参数自由组合
+
+# 4. 单步独立调试与维护
 ./build.sh --step llvm --debug           # 以调试模式单独重编 LLVM 模块
 ./build.sh --step musl --release --share # 以 Release 模式单独为 musl 编译共享库 (.so)
 ./build.sh --step verify                 # 单独运行产物校验与冒烟测试
 ./build.sh --rebuild-llvm --debug        # 重编 LLVM 及运行库并开启调试模式
-
-# 4. 流水线控制与维护
-./build.sh --from llvm         # 从 llvm 阶段开始向下连续执行至 verify
-./build.sh --package           # 构建完成后自动打包为 .tar.zst 离线发布包
-./build.sh --fetch             # 仅准备自举工具并拉取/挂载源码
-./build.sh --clean             # 清理编译临时目录与时间戳（保留 .bootstrap）
-./build.sh --clean-all         # 清理所有内容（包括 .bootstrap 引导环境）
-./build.sh --target riscv64-linux-musl # 指定目标平台配置
-JOBS=8 ./build.sh              # 控制并行编译核心数 (默认 6)
-```
+./build.sh --from llvm                   # 从 llvm 阶段开始向下连续执行至 verify
+./build.sh --package                     # 构建完成后自动打包为 .tar.zst 离线发布包
+./build.sh --clean                       # 清理编译临时目录与时间戳（保留 .bootstrap）
+./build.sh --clean-all                   # 清理所有内容（包括 .bootstrap 引导环境）
+./build.sh --target riscv64-linux-musl   # 指定目标平台配置
+JOBS=8 ./build.sh                        # 控制并行编译核心数 (默认 6)
 ```
 
 ---
@@ -66,17 +70,17 @@ JOBS=8 ./build.sh              # 控制并行编译核心数 (默认 6)
 
 本工具链构建系统采用**构建编排（Builder）与 LLVM 源码完全解耦**的架构，便于长期的芯片定制开发与上游版本升级。
 
-### 1. 使用本地自研/定制源码构建 (LLVM / Compiler-RT / Musl)
-如果您在本地维护了包含自研指令集（Custom Extension）、底层运行时 builtins 或 C 库的定制源码：
+### 1. 使用命令行参数或本地自研源码灵活定制
+如果您需要升级/切换上游版本，或者在本地维护了包含自研指令集（Custom Extension）、底层运行时 builtins 或 C 库的定制源码：
 ```bash
-# 挂载本地自研 LLVM 源码 (内含 compiler-rt)
+# 方式 A：命令行参数直接指定（推荐，支持自由组合）
+./build.sh --llvm-version 19 --debug
+./build.sh --llvm-src /path/to/your/custom-llvm --debug
+./build.sh --llvm-src /path/to/llvm --musl-src /path/to/musl --release
+
+# 方式 B：环境变量挂载
 LLVM_SRC=/path/to/your/custom-llvm ./build.sh
-
-# 挂载本地自研 Musl 源码
 MUSL_SRC=/path/to/your/custom-musl ./build.sh
-
-# 同时挂载自研源码并以调试模式重编 musl / llvm
-MUSL_SRC=/path/to/musl LLVM_SRC=/path/to/llvm ./build.sh --debug
 ```
 `build.sh` 会自动检测并挂载对应的源码树进行编译，产出包含您自定义特性的专属工具链。
 

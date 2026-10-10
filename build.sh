@@ -35,6 +35,12 @@ show_help() {
   ./build.sh --static-link       工具链 .cfg 配置文件中默认追加 -static 静态链接 (静态库下默认开启)
   ./build.sh --no-static-link    工具链 .cfg 配置文件中不默认追加 -static (亦支持 --no-default-static)
 
+组件版本与源码路径 (自由组合定制库版本与分支):
+  ./build.sh --llvm-version <VER> 指定 LLVM 版本/分支/标签/Commit (如 20, 19, release/19.x, main, llvmorg-19.1.0)
+  ./build.sh --musl-version <VER> 指定 Musl 版本/分支/标签/Commit (如 1.2.5, v1.2.5, master)
+  ./build.sh --llvm-src <DIR>     挂载本地 LLVM 自研源码目录 (无需重新拉取 Git)
+  ./build.sh --musl-src <DIR>     挂载本地 Musl 自研源码目录 (无需重新拉取 Git)
+
 辅助调试与控制开关:
   ./build.sh --assertions        显式开启 LLVM 断言 (精确定位 Pass 与 ISel 崩溃)
   ./build.sh --no-assertions     显式关闭 LLVM 断言
@@ -85,6 +91,10 @@ CLI_ASSERTIONS=""
 CLI_STRIP_SYMBOLS=""
 CLI_ENABLE_SHARED=""
 CLI_DEFAULT_STATIC_LINK=""
+CLI_LLVM_VERSION=""
+CLI_MUSL_VERSION=""
+CLI_LLVM_SRC=""
+CLI_MUSL_SRC=""
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -98,6 +108,10 @@ while [ $# -gt 0 ]; do
       CLI_STRIP_SYMBOLS="AUTO"
       CLI_ENABLE_SHARED="OFF"
       CLI_DEFAULT_STATIC_LINK="ON"
+      CLI_LLVM_VERSION=""
+      CLI_MUSL_VERSION=""
+      CLI_LLVM_SRC=""
+      CLI_MUSL_SRC=""
       shift
       ;;
     --release|--realse)
@@ -132,6 +146,26 @@ while [ $# -gt 0 ]; do
     --runtimes-build-type)
       [ -n "${2:-}" ] || die "--runtimes-build-type 需要指定模式 (Release|RelWithDebInfo|Debug|MinSizeRel)"
       CLI_RUNTIMES_BUILD_TYPE="$2"
+      shift 2
+      ;;
+    --llvm-version|--llvm-ver|--llvm-ref)
+      [ -n "${2:-}" ] || die "$1 需要指定版本/分支/Commit (如 20, 19, release/19.x, main, llvmorg-19.1.0)"
+      CLI_LLVM_VERSION="$2"
+      shift 2
+      ;;
+    --musl-version|--musl-ver|--musl-ref)
+      [ -n "${2:-}" ] || die "$1 需要指定版本/分支/Commit (如 1.2.5, v1.2.5, master)"
+      CLI_MUSL_VERSION="$2"
+      shift 2
+      ;;
+    --llvm-src)
+      [ -n "${2:-}" ] || die "--llvm-src 需要指定源码目录"
+      CLI_LLVM_SRC="$2"
+      shift 2
+      ;;
+    --musl-src)
+      [ -n "${2:-}" ] || die "--musl-src 需要指定源码目录"
+      CLI_MUSL_SRC="$2"
       shift 2
       ;;
     --strip)
@@ -211,10 +245,19 @@ init_config
 [ -n "$CLI_STRIP_SYMBOLS" ]       && STRIP_SYMBOLS="$CLI_STRIP_SYMBOLS"
 [ -n "$CLI_ENABLE_SHARED" ]       && ENABLE_SHARED="$CLI_ENABLE_SHARED"
 [ -n "$CLI_DEFAULT_STATIC_LINK" ] && DEFAULT_STATIC_LINK="$CLI_DEFAULT_STATIC_LINK"
+[ -n "$CLI_LLVM_VERSION" ]        && LLVM_VERSION="$CLI_LLVM_VERSION"
+[ -n "$CLI_MUSL_VERSION" ]        && MUSL_VERSION="$CLI_MUSL_VERSION"
+[ -n "$CLI_LLVM_SRC" ]            && LLVM_SRC="$CLI_LLVM_SRC"
+[ -n "$CLI_MUSL_SRC" ]            && MUSL_SRC="$CLI_MUSL_SRC"
 
 # 默认规则：若指定了动态库(ENABLE_SHARED=ON)且未显式指定静态链接，则默认动态链接
 if [ "$ENABLE_SHARED" = "ON" ] && [ -z "$CLI_DEFAULT_STATIC_LINK" ]; then
   DEFAULT_STATIC_LINK="OFF"
+fi
+
+# 若显式通过参数指定了组件版本或自研源码变更，自动清理 fetch 时间戳以触发更新检出
+if [ -n "$CLI_LLVM_VERSION" ] || [ -n "$CLI_MUSL_VERSION" ] || [ -n "$CLI_LLVM_SRC" ] || [ -n "$CLI_MUSL_SRC" ]; then
+  unmark fetch
 fi
 
 # ─── 前置检查 ────────────────────────────────────────────────────────────
@@ -224,6 +267,7 @@ command -v tar  >/dev/null || die "缺少 tar"
 
 printf '%s%s 无 GCC 工具链构建%s\n' "$c_hd" "$TARGET_TRIPLE" "$c_off"
 printf '  SRC     = %s\n  INSTALL = %s\n  JOBS    = %s\n  BUILD   = %s (Runtimes: %s, Assertions: %s, Strip: %s, Shared: %s, DefaultStatic: %s)\n' "$SRC" "$INSTALL" "$JOBS" "$BUILD_TYPE" "$RUNTIMES_BUILD_TYPE" "$ENABLE_ASSERTIONS" "$STRIP_SYMBOLS" "$ENABLE_SHARED" "$DEFAULT_STATIC_LINK"
+printf '  LLVM    = %s\n  MUSL    = %s\n' "${LLVM_SRC:-${LLVM_VERSION:-submodule default}}" "${MUSL_SRC:-${MUSL_VERSION:-submodule default}}"
 
 # 引入所有步骤模块
 # shellcheck disable=SC1091
