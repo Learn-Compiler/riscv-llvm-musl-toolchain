@@ -25,6 +25,17 @@ step_llvm() {
     step_host_cxx
   fi
 
+  local targets_to_build="${LLVM_TARGETS_TO_BUILD:-$LLVM_TARGET_ARCH}"
+  local enable_projects="${LLVM_ENABLE_PROJECTS:-clang;lld}"
+  local enable_runtimes="${LLVM_ENABLE_RUNTIMES:-compiler-rt;libcxx;libcxxabi;libunwind}"
+
+  local extra_cmake_flags=()
+  if [ -n "${LLVM_EXTRA_CMAKE_ARGS:-}" ]; then
+    read -r -a extra_cmake_flags <<< "${LLVM_EXTRA_CMAKE_ARGS}"
+  fi
+
+  log "4/5 配置 LLVM + runtimes (子项目: $enable_projects, 后端架构: $targets_to_build)"
+
   "$BOOT/bin/cmake" -G Ninja -S "$LLVM_DIR/llvm" -B "$BUILD" \
     -DCMAKE_BUILD_TYPE="$BUILD_TYPE" \
     -DLLVM_OPTIMIZED_TABLEGEN=ON \
@@ -37,9 +48,9 @@ step_llvm() {
     -DCMAKE_SHARED_LINKER_FLAGS="$HOST_LINK_FLAGS" \
     -DCMAKE_MODULE_LINKER_FLAGS="$HOST_LINK_FLAGS" \
     -DLLVM_ENABLE_PIC=ON \
-    -DLLVM_TARGETS_TO_BUILD="$LLVM_TARGET_ARCH" \
-    -DLLVM_ENABLE_PROJECTS="clang;lld" \
-    -DLLVM_ENABLE_RUNTIMES="compiler-rt;libcxx;libcxxabi;libunwind" \
+    -DLLVM_TARGETS_TO_BUILD="$targets_to_build" \
+    -DLLVM_ENABLE_PROJECTS="$enable_projects" \
+    -DLLVM_ENABLE_RUNTIMES="$enable_runtimes" \
     -DLLVM_DEFAULT_TARGET_TRIPLE="$T" \
     -DLLVM_RUNTIME_TARGETS="$T" \
     -DLLVM_INSTALL_TOOLCHAIN_ONLY=On \
@@ -81,7 +92,8 @@ step_llvm() {
     -DRUNTIMES_${T}_CMAKE_EXE_LINKER_FLAGS="-fuse-ld=lld" \
     -DRUNTIMES_${T}_CMAKE_SHARED_LINKER_FLAGS="-fuse-ld=lld" \
     -DRUNTIMES_${T}_CMAKE_MODULE_LINKER_FLAGS="-fuse-ld=lld" \
-    -DLLVM_PARALLEL_LINK_JOBS=1
+    -DLLVM_PARALLEL_LINK_JOBS=1 \
+    "${extra_cmake_flags[@]}"
 
   grep -qi 'COMPILER_RT_BUILD_CRT.*ON' "$BUILD/CMakeCache.txt" \
     || die "COMPILER_RT_BUILD_CRT 未生效，检查上面的 cmake 参数"

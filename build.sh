@@ -35,11 +35,16 @@ show_help() {
   ./build.sh --static-link       工具链 .cfg 配置文件中默认追加 -static 静态链接 (静态库下默认开启)
   ./build.sh --no-static-link    工具链 .cfg 配置文件中不默认追加 -static (亦支持 --no-default-static)
 
-组件版本与源码路径 (自由组合定制库版本与分支):
-  ./build.sh --llvm-version <VER> 指定 LLVM 版本/分支/标签/Commit (如 20, 19, release/19.x, main, llvmorg-19.1.0)
-  ./build.sh --musl-version <VER> 指定 Musl 版本/分支/标签/Commit (如 1.2.5, v1.2.5, master)
-  ./build.sh --llvm-src <DIR>     挂载本地 LLVM 自研源码目录 (无需重新拉取 Git)
-  ./build.sh --musl-src <DIR>     挂载本地 Musl 自研源码目录 (无需重新拉取 Git)
+组件与编译参数灵活定制 (支持自由组合子项目、MLIR 与额外参数):
+  ./build.sh --projects <LIST>   指定要构建的 LLVM 子项目列表 (如 "clang;lld;mlir"，分号分隔)
+  ./build.sh --enable-mlir       快捷启用 MLIR 子项目 (自动将 mlir 追加至构建列表)
+  ./build.sh --targets <LIST>    指定 LLVM 目标架构 (如 "RISCV;X86" 或 "all"，分号分隔)
+  ./build.sh --runtimes <LIST>   指定 LLVM 目标端运行时列表 (分号分隔)
+  ./build.sh --cmake-args <ARGS> 透传额外 CMake 参数至 LLVM (如 "-DLLVM_BUILD_EXAMPLES=OFF")
+  ./build.sh --musl-args <ARGS>  透传额外配置参数至 Musl configure
+  ./build.sh --torch-mlir-src <DIR> 挂载 torch-mlir 源码目录 (预留组件扩展)
+  ./build.sh --llvm-src <DIR>    挂载本地自研 LLVM 源码目录 (无需重新拉取 Git)
+  ./build.sh --musl-src <DIR>    挂载本地自研 Musl 源码目录 (无需重新拉取 Git)
 
 辅助调试与控制开关:
   ./build.sh --assertions        显式开启 LLVM 断言 (精确定位 Pass 与 ISel 崩溃)
@@ -64,17 +69,17 @@ show_help() {
   builtins    - 编译 compiler-rt builtins 与 crt (亦支持别名 --step compiler-rt)
   musl        - 编译 Musl libc 并安装至 Sysroot
   llvm        - 编译 LLVM/Clang 及全部运行时 (libc++/libunwind)
+  torch-mlir  - 配置并构建 torch-mlir 组件 (可扩展插件阶段)
   prune       - 精简无用跨平台工具、剥离符号、生成三元组链接与 .cfg
   verify      - 工具链运行库检查与 C/C++ 冒烟测试
   package     - 离线打包生成 .tar.zst 与 SHA256 校验和
 
 常用组合示例:
   ./build.sh --default
-  ./build.sh --release
-  ./build.sh --debug
-  ./build.sh --shared
-  ./build.sh --step llvm --debug
-  ./build.sh --step musl --release --share
+  ./build.sh --enable-mlir --debug
+  ./build.sh --projects "clang;lld;mlir" --targets "RISCV;X86" --debug
+  ./build.sh --step llvm --debug --cmake-args "-DLLVM_BUILD_EXAMPLES=OFF"
+  ./build.sh --step torch-mlir --torch-mlir-src /path/to/torch-mlir
 EOF
   exit 0
 }
@@ -91,8 +96,13 @@ CLI_ASSERTIONS=""
 CLI_STRIP_SYMBOLS=""
 CLI_ENABLE_SHARED=""
 CLI_DEFAULT_STATIC_LINK=""
-CLI_LLVM_VERSION=""
-CLI_MUSL_VERSION=""
+CLI_LLVM_PROJECTS=""
+CLI_ENABLE_MLIR=0
+CLI_LLVM_TARGETS=""
+CLI_LLVM_RUNTIMES=""
+CLI_LLVM_EXTRA_CMAKE_ARGS=()
+CLI_MUSL_EXTRA_ARGS=()
+CLI_TORCH_MLIR_SRC=""
 CLI_LLVM_SRC=""
 CLI_MUSL_SRC=""
 
@@ -108,8 +118,13 @@ while [ $# -gt 0 ]; do
       CLI_STRIP_SYMBOLS="AUTO"
       CLI_ENABLE_SHARED="OFF"
       CLI_DEFAULT_STATIC_LINK="ON"
-      CLI_LLVM_VERSION=""
-      CLI_MUSL_VERSION=""
+      CLI_LLVM_PROJECTS=""
+      CLI_ENABLE_MLIR=0
+      CLI_LLVM_TARGETS=""
+      CLI_LLVM_RUNTIMES=""
+      CLI_LLVM_EXTRA_CMAKE_ARGS=()
+      CLI_MUSL_EXTRA_ARGS=()
+      CLI_TORCH_MLIR_SRC=""
       CLI_LLVM_SRC=""
       CLI_MUSL_SRC=""
       shift
@@ -148,14 +163,38 @@ while [ $# -gt 0 ]; do
       CLI_RUNTIMES_BUILD_TYPE="$2"
       shift 2
       ;;
-    --llvm-version|--llvm-ver|--llvm-ref)
-      [ -n "${2:-}" ] || die "$1 需要指定版本/分支/Commit (如 20, 19, release/19.x, main, llvmorg-19.1.0)"
-      CLI_LLVM_VERSION="$2"
+    --projects|--llvm-projects)
+      [ -n "${2:-}" ] || die "$1 需要指定子项目列表 (如 \"clang;lld;mlir\")"
+      CLI_LLVM_PROJECTS="$2"
       shift 2
       ;;
-    --musl-version|--musl-ver|--musl-ref)
-      [ -n "${2:-}" ] || die "$1 需要指定版本/分支/Commit (如 1.2.5, v1.2.5, master)"
-      CLI_MUSL_VERSION="$2"
+    --enable-mlir|--mlir)
+      CLI_ENABLE_MLIR=1
+      shift
+      ;;
+    --targets|--llvm-targets|--targets-to-build)
+      [ -n "${2:-}" ] || die "$1 需要指定目标架构列表 (如 \"RISCV;X86\")"
+      CLI_LLVM_TARGETS="$2"
+      shift 2
+      ;;
+    --runtimes|--llvm-runtimes)
+      [ -n "${2:-}" ] || die "$1 需要指定目标运行库列表 (如 \"compiler-rt;libcxx;libcxxabi;libunwind\")"
+      CLI_LLVM_RUNTIMES="$2"
+      shift 2
+      ;;
+    --cmake-args|--llvm-cmake-args)
+      [ -n "${2:-}" ] || die "$1 需要指定 CMake 额外参数 (如 \"-DLLVM_BUILD_EXAMPLES=OFF\")"
+      CLI_LLVM_EXTRA_CMAKE_ARGS+=("$2")
+      shift 2
+      ;;
+    --musl-args)
+      [ -n "${2:-}" ] || die "$1 需要指定 Musl 额外配置参数"
+      CLI_MUSL_EXTRA_ARGS+=("$2")
+      shift 2
+      ;;
+    --torch-mlir-src)
+      [ -n "${2:-}" ] || die "$1 需要指定 torch-mlir 源码目录"
+      CLI_TORCH_MLIR_SRC="$2"
       shift 2
       ;;
     --llvm-src)
@@ -245,18 +284,45 @@ init_config
 [ -n "$CLI_STRIP_SYMBOLS" ]       && STRIP_SYMBOLS="$CLI_STRIP_SYMBOLS"
 [ -n "$CLI_ENABLE_SHARED" ]       && ENABLE_SHARED="$CLI_ENABLE_SHARED"
 [ -n "$CLI_DEFAULT_STATIC_LINK" ] && DEFAULT_STATIC_LINK="$CLI_DEFAULT_STATIC_LINK"
-[ -n "$CLI_LLVM_VERSION" ]        && LLVM_VERSION="$CLI_LLVM_VERSION"
-[ -n "$CLI_MUSL_VERSION" ]        && MUSL_VERSION="$CLI_MUSL_VERSION"
 [ -n "$CLI_LLVM_SRC" ]            && LLVM_SRC="$CLI_LLVM_SRC"
 [ -n "$CLI_MUSL_SRC" ]            && MUSL_SRC="$CLI_MUSL_SRC"
+[ -n "$CLI_TORCH_MLIR_SRC" ]      && TORCH_MLIR_SRC="$CLI_TORCH_MLIR_SRC"
+
+# 编译参数灵活覆盖与扩展
+[ -n "$CLI_LLVM_PROJECTS" ]       && LLVM_ENABLE_PROJECTS="$CLI_LLVM_PROJECTS"
+[ -n "$CLI_LLVM_TARGETS" ]        && LLVM_TARGETS_TO_BUILD="$CLI_LLVM_TARGETS"
+[ -n "$CLI_LLVM_RUNTIMES" ]       && LLVM_ENABLE_RUNTIMES="$CLI_LLVM_RUNTIMES"
+
+# 若显式指定 --enable-mlir，确保 mlir 被加入到 LLVM_ENABLE_PROJECTS 中
+if [ "$CLI_ENABLE_MLIR" = 1 ]; then
+  if [[ ";${LLVM_ENABLE_PROJECTS};" != *";mlir;"* ]]; then
+    LLVM_ENABLE_PROJECTS="${LLVM_ENABLE_PROJECTS};mlir"
+  fi
+fi
+
+# 拼接额外的 CMake 与 Musl 参数
+if [ ${#CLI_LLVM_EXTRA_CMAKE_ARGS[@]} -gt 0 ]; then
+  if [ -n "$LLVM_EXTRA_CMAKE_ARGS" ]; then
+    LLVM_EXTRA_CMAKE_ARGS="${LLVM_EXTRA_CMAKE_ARGS} ${CLI_LLVM_EXTRA_CMAKE_ARGS[*]}"
+  else
+    LLVM_EXTRA_CMAKE_ARGS="${CLI_LLVM_EXTRA_CMAKE_ARGS[*]}"
+  fi
+fi
+if [ ${#CLI_MUSL_EXTRA_ARGS[@]} -gt 0 ]; then
+  if [ -n "$MUSL_EXTRA_ARGS" ]; then
+    MUSL_EXTRA_ARGS="${MUSL_EXTRA_ARGS} ${CLI_MUSL_EXTRA_ARGS[*]}"
+  else
+    MUSL_EXTRA_ARGS="${CLI_MUSL_EXTRA_ARGS[*]}"
+  fi
+fi
 
 # 默认规则：若指定了动态库(ENABLE_SHARED=ON)且未显式指定静态链接，则默认动态链接
 if [ "$ENABLE_SHARED" = "ON" ] && [ -z "$CLI_DEFAULT_STATIC_LINK" ]; then
   DEFAULT_STATIC_LINK="OFF"
 fi
 
-# 若显式通过参数指定了组件版本或自研源码变更，自动清理 fetch 时间戳以触发更新检出
-if [ -n "$CLI_LLVM_VERSION" ] || [ -n "$CLI_MUSL_VERSION" ] || [ -n "$CLI_LLVM_SRC" ] || [ -n "$CLI_MUSL_SRC" ]; then
+# 若显式通过参数指定了自研源码变更，自动清理 fetch 时间戳以触发更新
+if [ -n "$CLI_LLVM_SRC" ] || [ -n "$CLI_MUSL_SRC" ] || [ -n "$CLI_TORCH_MLIR_SRC" ]; then
   unmark fetch
 fi
 
@@ -267,7 +333,8 @@ command -v tar  >/dev/null || die "缺少 tar"
 
 printf '%s%s 无 GCC 工具链构建%s\n' "$c_hd" "$TARGET_TRIPLE" "$c_off"
 printf '  SRC     = %s\n  INSTALL = %s\n  JOBS    = %s\n  BUILD   = %s (Runtimes: %s, Assertions: %s, Strip: %s, Shared: %s, DefaultStatic: %s)\n' "$SRC" "$INSTALL" "$JOBS" "$BUILD_TYPE" "$RUNTIMES_BUILD_TYPE" "$ENABLE_ASSERTIONS" "$STRIP_SYMBOLS" "$ENABLE_SHARED" "$DEFAULT_STATIC_LINK"
-printf '  LLVM    = %s\n  MUSL    = %s\n' "${LLVM_SRC:-${LLVM_VERSION:-submodule default}}" "${MUSL_SRC:-${MUSL_VERSION:-submodule default}}"
+printf '  PROJECTS= %s\n  TARGETS = %s\n' "${LLVM_ENABLE_PROJECTS:-clang;lld}" "${LLVM_TARGETS_TO_BUILD:-$LLVM_TARGET_ARCH}"
+[ -n "${LLVM_EXTRA_CMAKE_ARGS:-}" ] && printf '  CMAKE_EXTRA = %s\n' "$LLVM_EXTRA_CMAKE_ARGS"
 
 # 引入所有步骤模块
 # shellcheck disable=SC1091
@@ -280,6 +347,8 @@ source "$SRC/scripts/03_builtins.sh"
 source "$SRC/scripts/04_musl.sh"
 # shellcheck disable=SC1091
 source "$SRC/scripts/05_llvm.sh"
+# shellcheck disable=SC1091
+source "$SRC/scripts/05b_torch_mlir.sh"
 # shellcheck disable=SC1091
 source "$SRC/scripts/06_prune.sh"
 # shellcheck disable=SC1091
@@ -305,6 +374,9 @@ run_step() {
       ;;
     llvm)
       step_llvm
+      ;;
+    torch-mlir|torch_mlir)
+      step_torch_mlir
       ;;
     prune)
       step_prune

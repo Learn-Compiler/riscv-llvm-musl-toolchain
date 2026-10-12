@@ -43,17 +43,19 @@
 ./build.sh --static            # 显式指定仅构建目标静态库 (.a)（默认行为）
 ./build.sh --no-static-link    # 静态库模式下不默认向 .cfg 追加 -static (亦支持 --no-default-static)
 
-# 3. 自定义库版本与自研源码自由组合 (核心特性)
-./build.sh --llvm-version 19                   # 自动检出 LLVM 19 (release/19.x)
-./build.sh --llvm-version release/19.x --debug # 指定 LLVM 19 分支并开启调试模式
-./build.sh --musl-version 1.2.5                # 自动检出 Musl v1.2.5
+# 3. 灵活定制子项目、MLIR 与编译参数 (支持 torch-mlir 扩展)
+./build.sh --enable-mlir                       # 启用 MLIR 子项目构建 (clang;lld;mlir)
+./build.sh --projects "clang;lld;mlir" --debug # 自定义启用的 LLVM 子项目列表
+./build.sh --targets "RISCV;X86"               # 自定义后端架构 (如增加 Host JIT 架构)
+./build.sh --cmake-args "-DLLVM_BUILD_EXAMPLES=OFF" # 透传任意额外 CMake 参数
+./build.sh --step torch-mlir --torch-mlir-src /path/to/torch-mlir # 编译 torch-mlir 组件
 ./build.sh --llvm-src /path/to/custom-llvm     # 命令行直接挂载本地自研 LLVM 源码
 ./build.sh --musl-src /path/to/custom-musl     # 命令行直接挂载本地自研 Musl 源码
-./build.sh --llvm-version 19 --musl-version 1.2.5 --debug # 任意参数自由组合
 
 # 4. 单步独立调试与维护
 ./build.sh --step llvm --debug           # 以调试模式单独重编 LLVM 模块
 ./build.sh --step musl --release --share # 以 Release 模式单独为 musl 编译共享库 (.so)
+./build.sh --step torch-mlir             # 单独编译 torch-mlir 组件
 ./build.sh --step verify                 # 单独运行产物校验与冒烟测试
 ./build.sh --rebuild-llvm --debug        # 重编 LLVM 及运行库并开启调试模式
 ./build.sh --from llvm                   # 从 llvm 阶段开始向下连续执行至 verify
@@ -68,17 +70,20 @@ JOBS=8 ./build.sh                        # 控制并行编译核心数 (默认 6
 
 ## 🛠️ LLVM 二次开发与平滑升级指南
 
-本工具链构建系统采用**构建编排（Builder）与 LLVM 源码完全解耦**的架构，便于长期的芯片定制开发与上游版本升级。
+本工具链构建系统采用**构建编排（Builder）与 LLVM 源码完全解耦**的架构，便于长期的芯片定制开发、MLIR/torch-mlir 扩展与定制组件接入。
 
-### 1. 使用命令行参数或本地自研源码灵活定制
-如果您需要升级/切换上游版本，或者在本地维护了包含自研指令集（Custom Extension）、底层运行时 builtins 或 C 库的定制源码：
+### 1. 灵活定制编译参数与扩展组件 (MLIR / torch-mlir)
+如果您需要开启 MLIR、接入 torch-mlir、增加目标架构、或者挂载本地自研源码：
 ```bash
 # 方式 A：命令行参数直接指定（推荐，支持自由组合）
-./build.sh --llvm-version 19 --debug
+./build.sh --enable-mlir --debug
+./build.sh --projects "clang;lld;mlir" --targets "RISCV;X86" --debug
+./build.sh --cmake-args "-DLLVM_BUILD_EXAMPLES=OFF"
+./build.sh --step torch-mlir --torch-mlir-src /path/to/torch-mlir
 ./build.sh --llvm-src /path/to/your/custom-llvm --debug
-./build.sh --llvm-src /path/to/llvm --musl-src /path/to/musl --release
 
-# 方式 B：环境变量挂载
+# 方式 B：通过 config/local.env 或环境变量配置
+LLVM_ENABLE_PROJECTS="clang;lld;mlir" ./build.sh
 LLVM_SRC=/path/to/your/custom-llvm ./build.sh
 MUSL_SRC=/path/to/your/custom-musl ./build.sh
 ```

@@ -34,6 +34,11 @@ step_musl() {
     musl_shared_flags=("--disable-shared")
   fi
 
+  local musl_extra_flags=()
+  if [ -n "${MUSL_EXTRA_ARGS:-}" ]; then
+    read -r -a musl_extra_flags <<< "${MUSL_EXTRA_ARGS}"
+  fi
+
   CC="$BOOT/bin/clang --target=$T -fuse-ld=lld" \
   LIBCC="$BUILTIN_LIB" \
   ./configure \
@@ -43,6 +48,7 @@ step_musl() {
       --disable-gcc-wrapper \
       --enable-static \
       "${musl_shared_flags[@]}" \
+      "${musl_extra_flags[@]}" \
       LIBCC="$BUILTIN_LIB"
 
   make -j"$JOBS" LIBCC="$BUILTIN_LIB"
