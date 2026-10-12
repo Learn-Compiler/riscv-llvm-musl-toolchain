@@ -30,17 +30,17 @@ graph TD
     G --> H["最终交付: 纯 LLVM 独立工具链"]
 ```
 
-### 第一步：自举编译 Builtins (`03_builtins.sh`)
+### 第一步：自举编译 Builtins (`builtins.sh`)
 - 使用 `.bootstrap` 里的预编译 Clang 编译 `llvm-project/compiler-rt/lib/builtins`。
 - 传入 `-DCOMPILER_RT_BAREMETAL_BUILD=ON`，并构建一套临时的最小 dummy include 避免对宿主 glibc 的依赖。
 - 同时通过 `-DCOMPILER_RT_BUILD_CRT=ON` 生成关键的 ELF 初始化对象 `crtbegin.o` 和 `crtend.o`。
 
-### 第二步：编译 Musl Libc (`04_musl.sh`)
+### 第二步：编译 Musl Libc (`musl.sh`)
 - 调用 `./configure`，将 `CC` 设置为引导 Clang，并将 `LIBCC` 指向第一步编译出的 `libclang_rt.builtins-riscv64.a`。
 - 编译并安装 `libc.a`（及可选的 `libc.so`）、标准头文件至 `install-clang-musl/riscv64-unknown-linux-musl`。
 - 将 Linux 内核头文件软链接或安装至 Sysroot，形成完整的目标 C 环境。
 
-### 第三步：构建 LLVM 与完整 Runtimes (`05_llvm.sh`)
+### 第三步：构建 LLVM 与完整 Runtimes (`llvm.sh`)
 - 以刚刚生成的完整 Sysroot 为目标，配置 LLVM 的运行时多架构构建：
   ```cmake
   -DLLVM_RUNTIME_TARGETS="riscv64-unknown-linux-musl"

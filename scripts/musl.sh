@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# scripts/04_musl.sh - 使用宿主引导 Clang 编译并安装 Musl libc 到 Sysroot
+# scripts/musl.sh - 使用宿主引导 Clang 编译并安装 Musl libc 到 Sysroot
 # ==============================================================================
 set -euo pipefail
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# scripts/05_llvm.sh - 配置并构建 LLVM 工具链及运行时 (compiler-rt/libc++/libunwind)
+# scripts/llvm.sh - 配置并构建 LLVM 工具链及运行时 (compiler-rt/libc++/libunwind)
 # ==============================================================================
 set -euo pipefail
 
@@ -21,7 +21,7 @@ step_llvm() {
   # 保证宿主 CXX 参数有效（若未加载则自动探测）
   if [ -z "${HOST_CXX_FLAGS:-}" ] || [ -z "${HOST_LINK_FLAGS:-}" ]; then
     # shellcheck disable=SC1091
-    source "$SCRIPT_DIR/01_bootstrap.sh"
+    source "$SCRIPT_DIR/bootstrap.sh"
     step_host_cxx
   fi
 

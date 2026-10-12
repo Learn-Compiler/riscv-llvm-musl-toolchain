@@ -338,23 +338,23 @@ printf '  PROJECTS= %s\n  TARGETS = %s\n' "${LLVM_ENABLE_PROJECTS:-clang;lld}" "
 
 # 引入所有步骤模块
 # shellcheck disable=SC1091
-source "$SRC/scripts/01_bootstrap.sh"
+source "$SRC/scripts/bootstrap.sh"
 # shellcheck disable=SC1091
-source "$SRC/scripts/02_fetch.sh"
+source "$SRC/scripts/fetch.sh"
 # shellcheck disable=SC1091
-source "$SRC/scripts/03_builtins.sh"
+source "$SRC/scripts/builtins.sh"
 # shellcheck disable=SC1091
-source "$SRC/scripts/04_musl.sh"
+source "$SRC/scripts/musl.sh"
 # shellcheck disable=SC1091
-source "$SRC/scripts/05_llvm.sh"
+source "$SRC/scripts/llvm.sh"
 # shellcheck disable=SC1091
-source "$SRC/scripts/05b_torch_mlir.sh"
+source "$SRC/scripts/torch_mlir.sh"
 # shellcheck disable=SC1091
-source "$SRC/scripts/06_prune.sh"
+source "$SRC/scripts/prune.sh"
 # shellcheck disable=SC1091
-source "$SRC/scripts/07_verify.sh"
+source "$SRC/scripts/verify.sh"
 # shellcheck disable=SC1091
-source "$SRC/scripts/08_package.sh"
+source "$SRC/scripts/package.sh"
 
 run_step() {
   local step="$1"

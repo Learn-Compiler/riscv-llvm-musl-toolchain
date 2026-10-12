@@ -192,15 +192,16 @@ riscv-llvm-musl-toolchain/
 │   └── musl/                     # Musl C 库源码 (Git Submodule @ master)
 │
 ├── scripts/                      # 【执行层】模块化独立步骤流水线
-│   ├── common.sh                 # 公共基础设施（日志、时间戳打标、断点续传下载、Git 克隆）
-│   ├── 01_bootstrap.sh           # 阶段 1：免 root 准备引导工具 & 探测宿主 C++
-│   ├── 02_fetch.sh               # 阶段 2：准备源码 (Submodule 更新或挂载本地源码) 并自动应用补丁
-│   ├── 03_builtins.sh            # 阶段 3：安装 Musl 基础头文件并独立构建 compiler-rt builtins 与 crt
-│   ├── 04_musl.sh                # 阶段 4：配置并构建 Musl libc 并安装至 Sysroot
-│   ├── 05_llvm.sh                # 阶段 5：全量编译 LLVM/Clang 及全部运行时 (libc++/libunwind)
-│   ├── 06_prune.sh               # 阶段 6：精简裁剪、Strip、三元组软链接与生成 .cfg 配置文件
-│   ├── 07_verify.sh              # 阶段 7：构建产物验证与 C/C++ 冒烟测试
-│   └── 08_package.sh             # 阶段 8：打包发布 (tar.zst) 与计算 SHA256 校验和
+│   ├── common.sh                 # 公共基础设施（日志、时间戳打标、断点续传下载、工具探测）
+│   ├── bootstrap.sh              # 阶段 1：免 root 准备引导工具 & 探测宿主 C++
+│   ├── fetch.sh                  # 阶段 2：准备源码 (Submodule 更新或挂载本地源码) 并自动应用补丁
+│   ├── builtins.sh               # 阶段 3：安装 Musl 基础头文件并独立构建 compiler-rt builtins 与 crt
+│   ├── musl.sh                   # 阶段 4：配置并构建 Musl libc 并安装至 Sysroot
+│   ├── llvm.sh                   # 阶段 5：全量编译 LLVM/Clang 及全部运行时 (libc++/libunwind)
+│   ├── torch_mlir.sh             # 扩展阶段：配置并构建 torch-mlir 插件组件
+│   ├── prune.sh                  # 阶段 6：精简裁剪、Strip、三元组软链接与生成 .cfg 配置文件
+│   ├── verify.sh                 # 阶段 7：构建产物验证与 C/C++ 冒烟测试
+│   └── package.sh                # 阶段 8：打包发布 (tar.zst) 与计算 SHA256 校验和
 │
 ├── patches/                      # 【拓展层】组件补丁目录（自动检测应用）
 │   ├── llvm/                     # LLVM 自定义补丁 (*.patch)

@@ -35,15 +35,15 @@ description: >-
 
 | 步骤名 (`--step`) | 对应脚本 | 阶段职责说明 |
 | :--- | :--- | :--- |
-| `bootstrap` | [`scripts/01_bootstrap.sh`](../../scripts/01_bootstrap.sh) | 探测并下载免 root 引导工具 (Clang/CMake/Ninja)，探测宿主 C++ 运行时 |
-| `fetch` | [`scripts/02_fetch.sh`](../../scripts/02_fetch.sh) | 初始化并检出 `third_party/llvm` 与 `third_party/musl`，应用必要补丁 |
-| `builtins` | [`scripts/03_builtins.sh`](../../scripts/03_builtins.sh) | 跨架构编译 compiler-rt builtins 与 crtbegin/crtend (别名: `compiler-rt`) |
-| `musl` | [`scripts/04_musl.sh`](../../scripts/04_musl.sh) | 编译 Musl libc 并安装至 Sysroot (`install-clang-musl/riscv64-unknown-linux-musl`) |
-| `llvm` | [`scripts/05_llvm.sh`](../../scripts/05_llvm.sh) | 构建宿主 LLVM 工具链及目标端完整运行时 (compiler-rt, libc++, libunwind) |
-| `torch-mlir` | [`scripts/05b_torch_mlir.sh`](../../scripts/05b_torch_mlir.sh) | *(扩展阶段)* 对接已安装的 LLVM/MLIR 配置，独立构建与安装 torch-mlir |
-| `prune` | [`scripts/06_prune.sh`](../../scripts/06_prune.sh) | 移除无用跨平台二进制、符号剥离、生成三元组链接与目标 `.cfg` 驱动配置文件 |
-| `verify` | [`scripts/07_verify.sh`](../../scripts/07_verify.sh) | 校验运行库完整性，通过 QEMU 运行 C/C++ 冒烟测试并检测静态/动态链接行为 |
-| `package` | [`scripts/08_package.sh`](../../scripts/08_package.sh) | 打包发布产物为 `.tar.zst` 并计算 `SHA256SUMS` |
+| `bootstrap` | [`scripts/bootstrap.sh`](../../scripts/bootstrap.sh) | 探测并下载免 root 引导工具 (Clang/CMake/Ninja)，探测宿主 C++ 运行时 |
+| `fetch` | [`scripts/fetch.sh`](../../scripts/fetch.sh) | 初始化并检出 `third_party/llvm` 与 `third_party/musl`，应用必要补丁 |
+| `builtins` | [`scripts/builtins.sh`](../../scripts/builtins.sh) | 跨架构编译 compiler-rt builtins 与 crtbegin/crtend (别名: `compiler-rt`) |
+| `musl` | [`scripts/musl.sh`](../../scripts/musl.sh) | 编译 Musl libc 并安装至 Sysroot (`install-clang-musl/riscv64-unknown-linux-musl`) |
+| `llvm` | [`scripts/llvm.sh`](../../scripts/llvm.sh) | 构建宿主 LLVM 工具链及目标端完整运行时 (compiler-rt, libc++, libunwind) |
+| `torch-mlir` | [`scripts/torch_mlir.sh`](../../scripts/torch_mlir.sh) | *(扩展阶段)* 对接已安装的 LLVM/MLIR 配置，独立构建与安装 torch-mlir |
+| `prune` | [`scripts/prune.sh`](../../scripts/prune.sh) | 移除无用跨平台二进制、符号剥离、生成三元组链接与目标 `.cfg` 驱动配置文件 |
+| `verify` | [`scripts/verify.sh`](../../scripts/verify.sh) | 校验运行库完整性，通过 QEMU 运行 C/C++ 冒烟测试并检测静态/动态链接行为 |
+| `package` | [`scripts/package.sh`](../../scripts/package.sh) | 打包发布产物为 `.tar.zst` 并计算 `SHA256SUMS` |
 
 ---
 

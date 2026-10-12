@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# scripts/03_builtins.sh - 安装基础头文件并编译 compiler-rt builtins
+# scripts/builtins.sh - 安装基础头文件并编译 compiler-rt builtins
 # ==============================================================================
 set -euo pipefail
 
