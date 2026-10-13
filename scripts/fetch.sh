@@ -28,83 +28,15 @@ apply_patches() {
         ok "补丁 $p_name 应用完成"
       fi
     done
-  fi
-# 依据当前主控 LLVM 版本对齐 torch-mlir 对应兼容版本
-align_torch_mlir_to_llvm() {
-  local target_dir="$1"
-  local current_llvm
-  current_llvm=$(git -C "$LLVM_DIR" rev-parse HEAD 2>/dev/null || echo "${LLVM_SHA:-}")
-  [ -n "$current_llvm" ] || return 0
-
-  local target_torch_ref="${CLI_TORCH_MLIR_REF:-${TORCH_MLIR_SHA:-}}"
-
-  # 若未显式配置 torch-mlir 目标提交，则根据 LLVM 提交在 torch-mlir 历史中动态检索匹配的集成点
-  if [ -z "$target_torch_ref" ]; then
-    local matched
-    matched=$(git -C "$target_dir" log --grep="Integrate LLVM at .*${current_llvm:0:8}" -n 1 --format="%H" 2>/dev/null || true)
-    if [ -n "$matched" ]; then
-      target_torch_ref="$matched"
-    else
-      local llvm_time
-      llvm_time=$(git -C "$LLVM_DIR" log -1 --format="%ci" "$current_llvm" 2>/dev/null || true)
-      if [ -n "$llvm_time" ]; then
-        target_torch_ref=$(git -C "$target_dir" log --before="$llvm_time" -n 1 --format="%H" 2>/dev/null || true)
-      fi
-    fi
-  fi
-
-  if [ -n "$target_torch_ref" ]; then
-    local current_torch_head
-    current_torch_head=$(git -C "$target_dir" rev-parse HEAD 2>/dev/null || true)
-    if [[ "$current_torch_head" != "$target_torch_ref"* ]]; then
-      log "依据 LLVM 主控版本 (${current_llvm:0:10})，自动对齐 torch-mlir 至: ${target_torch_ref:0:10}"
-      git -C "$target_dir" checkout -q "$target_torch_ref" 2>/dev/null || true
-    fi
-    ok "torch-mlir 版本已对齐至: $(git -C "$target_dir" rev-parse --short HEAD 2>/dev/null || echo "$target_torch_ref")"
-  fi
 }
 
-# 依据当前主控 LLVM 版本对齐 torch-mlir 对应兼容版本
-align_torch_mlir_to_llvm() {
-  local target_dir="$1"
-  local current_llvm
-  current_llvm=$(git -C "$LLVM_DIR" rev-parse HEAD 2>/dev/null || echo "${LLVM_SHA:-}")
-  [ -n "$current_llvm" ] || return 0
-
-  local target_torch_ref="${CLI_TORCH_MLIR_REF:-${TORCH_MLIR_SHA:-}}"
-
-  # 若未显式配置 torch-mlir 目标提交，则根据 LLVM 提交在 torch-mlir 历史中动态检索匹配的集成点
-  if [ -z "$target_torch_ref" ]; then
-    local matched
-    matched=$(git -C "$target_dir" log --grep="Integrate LLVM at .*${current_llvm:0:8}" -n 1 --format="%H" 2>/dev/null || true)
-    if [ -n "$matched" ]; then
-      target_torch_ref="$matched"
-    else
-      local llvm_time
-      llvm_time=$(git -C "$LLVM_DIR" log -1 --format="%ci" "$current_llvm" 2>/dev/null || true)
-      if [ -n "$llvm_time" ]; then
-        target_torch_ref=$(git -C "$target_dir" log --before="$llvm_time" -n 1 --format="%H" 2>/dev/null || true)
-      fi
-    fi
-  fi
-
-  if [ -n "$target_torch_ref" ]; then
-    local current_torch_head
-    current_torch_head=$(git -C "$target_dir" rev-parse HEAD 2>/dev/null || true)
-    if [[ "$current_torch_head" != "$target_torch_ref"* ]]; then
-      log "依据 LLVM 主控版本 (${current_llvm:0:10})，自动对齐 torch-mlir 至: ${target_torch_ref:0:10}"
-      git -C "$target_dir" checkout -q "$target_torch_ref" 2>/dev/null || true
-    fi
-    ok "torch-mlir 版本已对齐至: $(git -C "$target_dir" rev-parse --short HEAD 2>/dev/null || echo "$target_torch_ref")"
-  fi
-}
 
 step_fetch() {
   if is_done fetch; then
     ok "源码已就绪，跳过"
     return
   fi
-  log "2/5 准备源码 (Submodule / 本地源码)"
+  log "准备源码 (Submodule / 本地源码)"
 
   # ---- 1. 准备 LLVM 源码 ----
   if [ -n "${LLVM_SRC:-}" ]; then
@@ -136,41 +68,19 @@ step_fetch() {
     ok "musl 子模组已就绪 ($(git -C "$MUSL_DIR" rev-parse --short HEAD 2>/dev/null || echo 'local'))"
   fi
 
-  # ---- 3. 准备并对齐 torch-mlir 源码 (由 LLVM 主控版本驱动) ----
-  local torch_src="${TORCH_MLIR_SRC:-$SRC/third_party/torch-mlir}"
+  # ---- 3. 准备 torch-mlir 源码 (Git Submodule / 本地挂载) ----
   if [ -n "${CLI_TORCH_MLIR_SRC:-}" ]; then
     log "使用本地挂载 torch-mlir 源码: $CLI_TORCH_MLIR_SRC"
     [ -f "$CLI_TORCH_MLIR_SRC/CMakeLists.txt" ] || die "指定的 TORCH_MLIR_SRC 缺少 CMakeLists.txt: $CLI_TORCH_MLIR_SRC"
     mkdir -p "$(dirname "$SRC/third_party/torch-mlir")"
     ln -sfn "$CLI_TORCH_MLIR_SRC" "$SRC/third_party/torch-mlir"
-  elif [ "${ENABLE_TORCH_MLIR:-0}" = 1 ] || [ "${CLI_ENABLE_TORCH_MLIR:-0}" = 1 ] || [ -d "$SRC/third_party/torch-mlir" ]; then
+  else
     if [ ! -f "$SRC/third_party/torch-mlir/CMakeLists.txt" ]; then
-      local local_cand=""
-      for cand in "/home/compiler-1/work/compiler/torch-mlir" "/home/compiler-1/learn/torch-mlir"; do
-        if [ -f "$cand/CMakeLists.txt" ]; then
-          local_cand="$cand"
-          break
-        fi
-      done
-      if [ -n "$local_cand" ]; then
-        log "检测到本地已有 torch-mlir 源码 ($local_cand)，建立软链接"
-        mkdir -p "$SRC/third_party"
-        ln -sfn "$local_cand" "$SRC/third_party/torch-mlir"
-      else
-        echo "  克隆 torch-mlir 源码 (upstream) ..."
-        mkdir -p "$SRC/third_party"
-        git clone "${TORCH_MLIR_REPO:-https://github.com/llvm/torch-mlir.git}" "$SRC/third_party/torch-mlir" || true
-      fi
+      echo "  初始化并检出 torch-mlir 子模组 ..."
+      git -C "$SRC" submodule update --init --depth 1 third_party/torch-mlir || \
+        git -C "$SRC" submodule update --init third_party/torch-mlir
     fi
-
-    # 由 LLVM 主控版本决定并切换 torch-mlir 对应版本
-    if [ -d "$SRC/third_party/torch-mlir/.git" ]; then
-      align_torch_mlir_to_llvm "$SRC/third_party/torch-mlir"
-    fi
-
-    if [ -f "$SRC/third_party/torch-mlir/CMakeLists.txt" ]; then
-      ok "torch-mlir 源码已就绪"
-    fi
+    ok "torch-mlir 子模组已就绪 ($(git -C "$SRC/third_party/torch-mlir" rev-parse --short HEAD 2>/dev/null || echo 'local'))"
   fi
 
   # ---- 4. 应用拓展补丁 ----
