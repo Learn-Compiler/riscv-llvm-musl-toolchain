@@ -137,6 +137,36 @@ EOF
     fi
   fi
 
+  # --- 冒烟测试：MLIR (若启用/已安装) ---
+  if [ -x "$INSTALL/bin/mlir-opt" ]; then
+    echo "  正在执行 MLIR 冒烟测试 ..."
+    "$INSTALL/bin/mlir-opt" --version >/dev/null 2>&1 || die "mlir-opt 无法执行"
+    cat > "$wd/test.mlir" <<'EOF'
+module {
+  func.func @test(%arg0: i32) -> i32 {
+    return %arg0 : i32
+  }
+}
+EOF
+    "$INSTALL/bin/mlir-opt" "$wd/test.mlir" -o "$wd/test_opt.mlir" || die "mlir-opt 解析/优化基础 MLIR 失败"
+    ok "MLIR (mlir-opt) 功能测试通过"
+  fi
+
+  # --- 冒烟测试：torch-mlir (若启用/已安装) ---
+  if [ -x "$INSTALL/bin/torch-mlir-opt" ]; then
+    echo "  正在执行 torch-mlir 冒烟测试 ..."
+    "$INSTALL/bin/torch-mlir-opt" --version >/dev/null 2>&1 || die "torch-mlir-opt 无法执行"
+    cat > "$wd/torch_test.mlir" <<'EOF'
+module {
+  func.func @torch_add(%arg0: !torch.int, %arg1: !torch.int) -> !torch.int {
+    return %arg0 : !torch.int
+  }
+}
+EOF
+    "$INSTALL/bin/torch-mlir-opt" "$wd/torch_test.mlir" -o "$wd/torch_test_opt.mlir" || die "torch-mlir-opt 解析基础 torch 方言失败"
+    ok "torch-mlir (torch-mlir-opt) 方言与工具链测试通过"
+  fi
+
   mark verify
   ok "验证全部通过"
 }

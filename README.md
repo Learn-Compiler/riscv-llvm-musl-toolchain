@@ -45,10 +45,12 @@
 
 # 3. 灵活定制子项目、MLIR 与编译参数 (支持 torch-mlir 扩展)
 ./build.sh --enable-mlir                       # 启用 MLIR 子项目构建 (clang;lld;mlir)
+./build.sh --enable-torch-mlir                 # 快捷启用 MLIR + torch-mlir 完整流水线构建
 ./build.sh --projects "clang;lld;mlir" --debug # 自定义启用的 LLVM 子项目列表
 ./build.sh --targets "RISCV;X86"               # 自定义后端架构 (如增加 Host JIT 架构)
 ./build.sh --cmake-args "-DLLVM_BUILD_EXAMPLES=OFF" # 透传任意额外 CMake 参数
-./build.sh --step torch-mlir --torch-mlir-src /path/to/torch-mlir # 编译 torch-mlir 组件
+./build.sh --step torch-mlir                   # 单独编译 torch-mlir 组件 (自动对接 MLIR 与源码)
+./build.sh --step torch-mlir --torch-mlir-src /path/to/torch-mlir # 挂载自定义 torch-mlir 源码
 ./build.sh --llvm-src /path/to/custom-llvm     # 命令行直接挂载本地自研 LLVM 源码
 ./build.sh --musl-src /path/to/custom-musl     # 命令行直接挂载本地自研 Musl 源码
 
@@ -77,8 +79,11 @@ JOBS=8 ./build.sh                        # 控制并行编译核心数 (默认 6
 ```bash
 # 方式 A：命令行参数直接指定（推荐，支持自由组合）
 ./build.sh --enable-mlir --debug
+./build.sh --enable-torch-mlir --debug             # 一键构建 MLIR + 自动对齐的 torch-mlir
 ./build.sh --projects "clang;lld;mlir" --targets "RISCV;X86" --debug
 ./build.sh --cmake-args "-DLLVM_BUILD_EXAMPLES=OFF"
+./build.sh --step torch-mlir                       # 单独构建 torch-mlir (由 LLVM 版本自动对齐)
+./build.sh --step torch-mlir --torch-mlir-version <commit> # 指定特定 torch-mlir 提交
 ./build.sh --step torch-mlir --torch-mlir-src /path/to/torch-mlir
 ./build.sh --llvm-src /path/to/your/custom-llvm --debug
 
@@ -89,7 +94,14 @@ MUSL_SRC=/path/to/your/custom-musl ./build.sh
 ```
 `build.sh` 会自动检测并挂载对应的源码树进行编译，产出包含您自定义特性的专属工具链。
 
-### 2. 日常二次开发与调试模式（Debug / RelWithDebInfo / Assertions）
+### 2. LLVM 主控驱动的 torch-mlir 版本对齐体系
+
+本工具链采用 **“以 LLVM 版本为主控基准，下游 torch-mlir 自动适配对齐”** 的架构：
+- **设计初衷**：在交叉工具链中，LLVM 是核心编译器基石，而 torch-mlir 是基于 MLIR 的前端扩展方言。由于 MLIR 内部 C++ API 演进频繁，版本必须严格契合。
+- **动态推导**：无论使用的是基准 LLVM 还是自定义 LLVM 源码，构建系统会根据当前 LLVM 的 commit/提交时间戳，自动在 `torch-mlir` 仓库中检索兼容的集成节点并自动切换。
+- **开箱即用**：在 `config/default.env` 中固化了官方黄金配对组合，用户只需 `./build.sh --enable-torch-mlir` 即可全自动完成版本对齐与端到端编译。
+
+### 3. 日常二次开发与调试模式（Debug / RelWithDebInfo / Assertions）
 
 LLVM 二次开发调试与普通软件开发不同：
 - **纯 Debug 模式 (`-O0 -g`)**：二进制极其庞大（单个 clang > 2GB），链接极耗内存（容易触发 OOM），编译器运行慢 10~20 倍。

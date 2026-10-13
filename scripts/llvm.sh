@@ -25,16 +25,33 @@ step_llvm() {
     step_host_cxx
   fi
 
-  local targets_to_build="${LLVM_TARGETS_TO_BUILD:-$LLVM_TARGET_ARCH}"
   local enable_projects="${LLVM_ENABLE_PROJECTS:-clang;lld}"
   local enable_runtimes="${LLVM_ENABLE_RUNTIMES:-compiler-rt;libcxx;libcxxabi;libunwind}"
+
+  local targets_to_build="${LLVM_TARGETS_TO_BUILD:-}"
+  if [ -z "$targets_to_build" ]; then
+    if [[ ";${enable_projects};" == *";mlir;"* ]] || [ "${ENABLE_MLIR:-0}" = 1 ] || [ "${ENABLE_TORCH_MLIR:-0}" = 1 ]; then
+      targets_to_build="${LLVM_TARGET_ARCH};X86"
+    else
+      targets_to_build="$LLVM_TARGET_ARCH"
+    fi
+  fi
+
+  local install_toolchain_only="${LLVM_INSTALL_TOOLCHAIN_ONLY:-auto}"
+  if [ "$install_toolchain_only" = "auto" ]; then
+    if [[ ";${enable_projects};" == *";mlir;"* ]] || [ "${ENABLE_MLIR:-0}" = 1 ] || [ "${ENABLE_TORCH_MLIR:-0}" = 1 ]; then
+      install_toolchain_only="Off"
+    else
+      install_toolchain_only="On"
+    fi
+  fi
 
   local extra_cmake_flags=()
   if [ -n "${LLVM_EXTRA_CMAKE_ARGS:-}" ]; then
     read -r -a extra_cmake_flags <<< "${LLVM_EXTRA_CMAKE_ARGS}"
   fi
 
-  log "4/5 配置 LLVM + runtimes (子项目: $enable_projects, 后端架构: $targets_to_build)"
+  log "4/5 配置 LLVM + runtimes (子项目: $enable_projects, 后端架构: $targets_to_build, ToolchainOnly: $install_toolchain_only)"
 
   "$BOOT/bin/cmake" -G Ninja -S "$LLVM_DIR/llvm" -B "$BUILD" \
     -DCMAKE_BUILD_TYPE="$BUILD_TYPE" \
@@ -53,7 +70,8 @@ step_llvm() {
     -DLLVM_ENABLE_RUNTIMES="$enable_runtimes" \
     -DLLVM_DEFAULT_TARGET_TRIPLE="$T" \
     -DLLVM_RUNTIME_TARGETS="$T" \
-    -DLLVM_INSTALL_TOOLCHAIN_ONLY=On \
+    -DLLVM_INSTALL_TOOLCHAIN_ONLY="$install_toolchain_only" \
+    -DLLVM_INSTALL_UTILS=ON \
     -DLLVM_ENABLE_ASSERTIONS="$ENABLE_ASSERTIONS" \
     -DLLVM_INCLUDE_TESTS=OFF \
     -DDEFAULT_SYSROOT=../sysroot \
@@ -83,6 +101,7 @@ step_llvm() {
     -DRUNTIMES_${T}_LIBCXXABI_USE_LLVM_UNWINDER=ON \
     -DRUNTIMES_${T}_LIBCXX_ENABLE_SHARED=${ENABLE_SHARED:-OFF} \
     -DRUNTIMES_${T}_LIBCXX_ENABLE_STATIC=ON \
+    -DRUNTIMES_${T}_LIBCXX_ENABLE_ABI_LINKER_SCRIPT=${ENABLE_SHARED:-OFF} \
     -DRUNTIMES_${T}_LIBCXXABI_ENABLE_SHARED=${ENABLE_SHARED:-OFF} \
     -DRUNTIMES_${T}_LIBCXXABI_ENABLE_STATIC=ON \
     -DRUNTIMES_${T}_LIBUNWIND_ENABLE_SHARED=${ENABLE_SHARED:-OFF} \

@@ -23,6 +23,7 @@
 ### 组件定制与参数透传
 - `--projects <LIST>`：自定义 LLVM 子项目列表（如 `"clang;lld;mlir"`）。
 - `--enable-mlir`, `--mlir`：快捷开启 MLIR 子项目。
+- `--enable-torch-mlir`, `--torch-mlir`：快捷开启 MLIR 与 torch-mlir 完整流水线。
 - `--targets <LIST>`：指定 LLVM 编译后端架构（如 `"RISCV;X86"`）。
 - `--runtimes <LIST>`：指定 LLVM 目标运行时（默认: `"compiler-rt;libcxx;libcxxabi;libunwind"`）。
 - `--cmake-args <ARGS>`：透传额外参数给 LLVM CMake（可多次传入）。

@@ -68,13 +68,21 @@ description: >-
 ./build.sh --full-debug
 ```
 
-### 3.3 启用 MLIR 与准备 torch-mlir 组件
-当需要支持 MLIR 或构建 `torch-mlir` 时：
+### 3.3 启用 MLIR 与构建 torch-mlir 组件 (LLVM 主控驱动版本)
+本体系采用**以核心 LLVM 为主控基准，自动推导与对齐下游 torch-mlir 对应版本**的机制：
 ```bash
+# 方式 A: 一键构建完整流水线 (自动由 LLVM 版本推导并切换匹配的 torch-mlir 节点)
+./build.sh --enable-torch-mlir --debug
+
+# 方式 B: 分步构建
 # 步骤 1: 构建启用 MLIR 与宿主 X86/RISCV 架构的 LLVM
 ./build.sh --enable-mlir --targets "RISCV;X86" --debug
 
-# 步骤 2: 单独构建 torch-mlir 组件
+# 步骤 2: 单独构建 torch-mlir 组件 (系统自动根据当前 LLVM commit 检出兼容的 torch-mlir 提交)
+./build.sh --step torch-mlir
+
+# 方式 C: 显式指定特定的 torch-mlir 提交节点或本地源码
+./build.sh --step torch-mlir --torch-mlir-version d3071f4785
 ./build.sh --step torch-mlir --torch-mlir-src /path/to/torch-mlir
 ```
 

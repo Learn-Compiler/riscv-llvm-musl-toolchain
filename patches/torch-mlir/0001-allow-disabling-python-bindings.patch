@@ -1,0 +1,9 @@
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -131,3 +131,5 @@
+   # Don't try to compile the python extensions at the moment. We need
+   # to import lots of dependencies from AddMLIRPython to make this work.
+-  set(MLIR_ENABLE_BINDINGS_PYTHON ON)
++  if(NOT DEFINED MLIR_ENABLE_BINDINGS_PYTHON)
++    set(MLIR_ENABLE_BINDINGS_PYTHON ON)
++  endif()

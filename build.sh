@@ -38,6 +38,7 @@ show_help() {
 组件与编译参数灵活定制 (支持自由组合子项目、MLIR 与额外参数):
   ./build.sh --projects <LIST>   指定要构建的 LLVM 子项目列表 (如 "clang;lld;mlir"，分号分隔)
   ./build.sh --enable-mlir       快捷启用 MLIR 子项目 (自动将 mlir 追加至构建列表)
+  ./build.sh --enable-torch-mlir 快捷启用 MLIR 与 torch-mlir 完整流水线 (亦支持 --torch-mlir)
   ./build.sh --targets <LIST>    指定 LLVM 目标架构 (如 "RISCV;X86" 或 "all"，分号分隔)
   ./build.sh --runtimes <LIST>   指定 LLVM 目标端运行时列表 (分号分隔)
   ./build.sh --cmake-args <ARGS> 透传额外 CMake 参数至 LLVM (如 "-DLLVM_BUILD_EXAMPLES=OFF")
@@ -51,6 +52,8 @@ show_help() {
   ./build.sh --no-assertions     显式关闭 LLVM 断言
   ./build.sh --strip             强制剥离宿主程序符号 (Strip)
   ./build.sh --no-strip          保留宿主程序与库调试符号
+  ./build.sh --torch-mlir-version <REF> 指定特定的 torch-mlir 版本/Commit (默认由 LLVM 版本自动对齐)
+  ./build.sh --strict-versions    开启严格版本校验 (LLVM 与 torch-mlir 不匹配时报错中止)
 
 模块流水线与维护选项:
   ./build.sh --step <步骤名>     单独执行某一特定步骤 (可多次指定，如 --step musl --step llvm)
@@ -98,6 +101,9 @@ CLI_ENABLE_SHARED=""
 CLI_DEFAULT_STATIC_LINK=""
 CLI_LLVM_PROJECTS=""
 CLI_ENABLE_MLIR=0
+CLI_ENABLE_TORCH_MLIR=0
+CLI_TORCH_MLIR_REF=""
+CLI_STRICT_VERSIONS=0
 CLI_LLVM_TARGETS=""
 CLI_LLVM_RUNTIMES=""
 CLI_LLVM_EXTRA_CMAKE_ARGS=()
@@ -120,6 +126,7 @@ while [ $# -gt 0 ]; do
       CLI_DEFAULT_STATIC_LINK="ON"
       CLI_LLVM_PROJECTS=""
       CLI_ENABLE_MLIR=0
+      CLI_ENABLE_TORCH_MLIR=0
       CLI_LLVM_TARGETS=""
       CLI_LLVM_RUNTIMES=""
       CLI_LLVM_EXTRA_CMAKE_ARGS=()
@@ -172,6 +179,11 @@ while [ $# -gt 0 ]; do
       CLI_ENABLE_MLIR=1
       shift
       ;;
+    --enable-torch-mlir|--torch-mlir)
+      CLI_ENABLE_TORCH_MLIR=1
+      CLI_ENABLE_MLIR=1
+      shift
+      ;;
     --targets|--llvm-targets|--targets-to-build)
       [ -n "${2:-}" ] || die "$1 需要指定目标架构列表 (如 \"RISCV;X86\")"
       CLI_LLVM_TARGETS="$2"
@@ -196,6 +208,15 @@ while [ $# -gt 0 ]; do
       [ -n "${2:-}" ] || die "$1 需要指定 torch-mlir 源码目录"
       CLI_TORCH_MLIR_SRC="$2"
       shift 2
+      ;;
+    --torch-mlir-version|--torch-mlir-ref)
+      [ -n "${2:-}" ] || die "$1 需要指定版本或 Commit SHA"
+      CLI_TORCH_MLIR_REF="$2"
+      shift 2
+      ;;
+    --strict-versions)
+      CLI_STRICT_VERSIONS=1
+      shift
       ;;
     --llvm-src)
       [ -n "${2:-}" ] || die "--llvm-src 需要指定源码目录"
@@ -293,12 +314,18 @@ init_config
 [ -n "$CLI_LLVM_TARGETS" ]        && LLVM_TARGETS_TO_BUILD="$CLI_LLVM_TARGETS"
 [ -n "$CLI_LLVM_RUNTIMES" ]       && LLVM_ENABLE_RUNTIMES="$CLI_LLVM_RUNTIMES"
 
-# 若显式指定 --enable-mlir，确保 mlir 被加入到 LLVM_ENABLE_PROJECTS 中
-if [ "$CLI_ENABLE_MLIR" = 1 ]; then
+# 若显式指定 --enable-mlir 或 --enable-torch-mlir，确保 mlir 被加入到 LLVM_ENABLE_PROJECTS 中
+if [ "$CLI_ENABLE_MLIR" = 1 ] || [ "${CLI_ENABLE_TORCH_MLIR:-0}" = 1 ]; then
   if [[ ";${LLVM_ENABLE_PROJECTS};" != *";mlir;"* ]]; then
     LLVM_ENABLE_PROJECTS="${LLVM_ENABLE_PROJECTS};mlir"
   fi
+  ENABLE_MLIR=1
 fi
+if [ "${CLI_ENABLE_TORCH_MLIR:-0}" = 1 ]; then
+  ENABLE_TORCH_MLIR=1
+fi
+[ -n "${CLI_TORCH_MLIR_REF:-}" ] && TORCH_MLIR_SHA="$CLI_TORCH_MLIR_REF"
+[ "${CLI_STRICT_VERSIONS:-0}" = 1 ] && STRICT_VERSIONS=1
 
 # 拼接额外的 CMake 与 Musl 参数
 if [ ${#CLI_LLVM_EXTRA_CMAKE_ARGS[@]} -gt 0 ]; then
@@ -414,6 +441,9 @@ fi
 
 # 标准流水线步骤序列
 PIPELINE=(bootstrap fetch builtins musl llvm prune verify)
+if [ "${ENABLE_TORCH_MLIR:-0}" = 1 ] || [ "${CLI_ENABLE_TORCH_MLIR:-0}" = 1 ]; then
+  PIPELINE=(bootstrap fetch builtins musl llvm torch-mlir prune verify)
+fi
 
 if [ "$ONLY_FETCH" = 1 ]; then
   PIPELINE=(bootstrap fetch)
