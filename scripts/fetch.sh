@@ -64,6 +64,41 @@ align_torch_mlir_to_llvm() {
   fi
 }
 
+# 依据当前主控 LLVM 版本对齐 torch-mlir 对应兼容版本
+align_torch_mlir_to_llvm() {
+  local target_dir="$1"
+  local current_llvm
+  current_llvm=$(git -C "$LLVM_DIR" rev-parse HEAD 2>/dev/null || echo "${LLVM_SHA:-}")
+  [ -n "$current_llvm" ] || return 0
+
+  local target_torch_ref="${CLI_TORCH_MLIR_REF:-${TORCH_MLIR_SHA:-}}"
+
+  # 若未显式配置 torch-mlir 目标提交，则根据 LLVM 提交在 torch-mlir 历史中动态检索匹配的集成点
+  if [ -z "$target_torch_ref" ]; then
+    local matched
+    matched=$(git -C "$target_dir" log --grep="Integrate LLVM at .*${current_llvm:0:8}" -n 1 --format="%H" 2>/dev/null || true)
+    if [ -n "$matched" ]; then
+      target_torch_ref="$matched"
+    else
+      local llvm_time
+      llvm_time=$(git -C "$LLVM_DIR" log -1 --format="%ci" "$current_llvm" 2>/dev/null || true)
+      if [ -n "$llvm_time" ]; then
+        target_torch_ref=$(git -C "$target_dir" log --before="$llvm_time" -n 1 --format="%H" 2>/dev/null || true)
+      fi
+    fi
+  fi
+
+  if [ -n "$target_torch_ref" ]; then
+    local current_torch_head
+    current_torch_head=$(git -C "$target_dir" rev-parse HEAD 2>/dev/null || true)
+    if [[ "$current_torch_head" != "$target_torch_ref"* ]]; then
+      log "依据 LLVM 主控版本 (${current_llvm:0:10})，自动对齐 torch-mlir 至: ${target_torch_ref:0:10}"
+      git -C "$target_dir" checkout -q "$target_torch_ref" 2>/dev/null || true
+    fi
+    ok "torch-mlir 版本已对齐至: $(git -C "$target_dir" rev-parse --short HEAD 2>/dev/null || echo "$target_torch_ref")"
+  fi
+}
+
 step_fetch() {
   if is_done fetch; then
     ok "源码已就绪，跳过"
