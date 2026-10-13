@@ -36,7 +36,7 @@ description: >-
 | 步骤名 (`--step`) | 对应脚本 | 阶段职责说明 |
 | :--- | :--- | :--- |
 | `bootstrap` | [`scripts/bootstrap.sh`](../../scripts/bootstrap.sh) | 探测并下载免 root 引导工具 (Clang/CMake/Ninja)，探测宿主 C++ 运行时 |
-| `fetch` | [`scripts/fetch.sh`](../../scripts/fetch.sh) | 初始化并检出 `third_party/llvm` 与 `third_party/musl`，应用必要补丁 |
+| `fetch` | [`scripts/fetch.sh`](../../scripts/fetch.sh) | 初始化并检出 `third_party` 子模组 (llvm, musl, torch-mlir)，应用必要补丁 |
 | `builtins` | [`scripts/builtins.sh`](../../scripts/builtins.sh) | 跨架构编译 compiler-rt builtins 与 crtbegin/crtend (别名: `compiler-rt`) |
 | `musl` | [`scripts/musl.sh`](../../scripts/musl.sh) | 编译 Musl libc 并安装至 Sysroot (`install-clang-musl/riscv64-unknown-linux-musl`) |
 | `llvm` | [`scripts/llvm.sh`](../../scripts/llvm.sh) | 构建宿主 LLVM 工具链及目标端完整运行时 (compiler-rt, libc++, libunwind) |
