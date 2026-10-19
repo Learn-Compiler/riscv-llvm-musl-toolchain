@@ -14,7 +14,7 @@ step_musl() {
     ok "musl sysroot 已就绪，跳过"
     return
   fi
-  log "3/5 编译 musl → $SYSROOT"
+  log "编译 musl → $SYSROOT"
   mkdir -p "$SYSROOT" "$SHIM"
   for t in ar ranlib strip nm objcopy; do
     ln -sf "$BOOT/bin/llvm-$t" "$SHIM/${MUSL_TARGET}-$t"
@@ -60,7 +60,10 @@ step_musl() {
   fi
 
   # 补内核头文件（musl 的 --with-headers 是无效选项，会被静默忽略）
-  cp -a "$SRC/linux-headers/include/." "$SYSROOT/usr/include/"
+  local hdr_dir
+  hdr_dir="$(get_linux_headers_include_dir)"
+  [ -d "$hdr_dir" ] || die "缺少 Linux 内核头文件目录: $hdr_dir"
+  cp -a "$hdr_dir/." "$SYSROOT/usr/include/"
 
   local check_files=(usr/lib/libc.a usr/lib/crt1.o usr/include/stdio.h)
   if [ "${ENABLE_SHARED:-OFF}" = "ON" ]; then

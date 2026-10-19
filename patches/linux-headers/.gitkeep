@@ -1,0 +1,2 @@
+# patches/linux-headers
+# Place custom patches (*.patch) here to be automatically applied to third_party/linux-headers

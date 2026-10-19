@@ -18,6 +18,19 @@ STAMPS="${STAMPS:-$SRC/.build-stamps}"
 SHIM="${SHIM:-$SRC/.musl-shim}"
 LLVM_DIR="${LLVM_DIR:-$SRC/third_party/llvm}"
 MUSL_DIR="${MUSL_DIR:-$SRC/third_party/musl}"
+LINUX_HEADERS_DIR="${LINUX_HEADERS_DIR:-$SRC/third_party/linux-headers}"
+
+get_linux_headers_include_dir() {
+  if [ -d "${LINUX_HEADERS_DIR:-}/include" ]; then
+    echo "$LINUX_HEADERS_DIR/include"
+  elif [ -d "${LINUX_HEADERS_DIR:-}/riscv/include" ]; then
+    echo "$LINUX_HEADERS_DIR/riscv/include"
+  elif [ -d "$SRC/linux-headers/include" ]; then
+    echo "$SRC/linux-headers/include"
+  else
+    echo "${LINUX_HEADERS_DIR:-$SRC/third_party/linux-headers}/include"
+  fi
+}
 
 # 将自举引导工具优先加入 PATH 与动态库检索路径
 export PATH="$BOOT/bin:${PATH}"
@@ -93,7 +106,13 @@ init_config() {
     source "$SRC/config/default.env"
   fi
 
-  # 2. 载入用户本地个性化配置（若存在）
+  # 2. 载入版本锁定配置（若存在）
+  if [ -f "$SRC/config/versions.lock" ]; then
+    # shellcheck disable=SC1091
+    source "$SRC/config/versions.lock"
+  fi
+
+  # 3. 载入用户本地个性化配置（若存在，可覆盖锁定版本）
   if [ -f "$SRC/config/local.env" ]; then
     # shellcheck disable=SC1091
     source "$SRC/config/local.env"

@@ -14,9 +14,12 @@ step_builtins() {
     ok "compiler-rt builtins 已就绪，跳过"
     return
   fi
-  log "2b/5 准备目标基础头文件并编译 compiler-rt builtins"
+  log "准备目标基础头文件并编译 compiler-rt builtins"
   mkdir -p "$SYSROOT/usr/include"
-  cp -a "$SRC/linux-headers/include/." "$SYSROOT/usr/include/"
+  local hdr_dir
+  hdr_dir="$(get_linux_headers_include_dir)"
+  [ -d "$hdr_dir" ] || die "缺少 Linux 内核头文件目录: $hdr_dir (请先执行 ./build.sh --step fetch)"
+  cp -a "$hdr_dir/." "$SYSROOT/usr/include/"
 
   # 1. 安装 musl 基础头文件到 sysroot（只需头文件，几秒钟即可完成）
   echo "  安装 musl 头文件到 $SYSROOT/usr/include ..."
