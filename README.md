@@ -159,7 +159,7 @@ gdb --args install-clang-musl/bin/riscv64-unknown-linux-musl-clang -O2 test.c
 1. **源码同步**：在您的自研 `llvm-project` 仓库中直接拉取并变基：
    ```bash
    git fetch upstream
-   git rebase upstream/release/20.x
+   git rebase upstream/release/23.x
    ```
    只需专注于解决纯代码层面的冲突，构建系统不受任何干扰。
 2. **更新脚本配置**：如需升级默认拉取的官方版本，只需在 `build.sh` 中修改 `LLVM_SHA` 变量为上游的目标 commit 哈希即可。
@@ -200,9 +200,10 @@ riscv-llvm-musl-toolchain/
 │       └── riscv64-linux-musl.env# RISC-V 64 Musl 专属平台参数
 │
 ├── third_party/                  # 【第三方源码组件（Git Submodule 管理）】
-│   ├── llvm/                     # LLVM 项目源码 (@ release/20.x，内含 compiler-rt 与 MLIR)
+│   ├── llvm/                     # LLVM 项目源码 (@ release/23.x，内含 compiler-rt 与 MLIR)
 │   ├── musl/                     # Musl C 库源码 (@ master / v1.2.6)
-│   └── torch-mlir/               # torch-mlir 源码 (@ main)
+│   ├── torch-mlir/               # torch-mlir 源码 (@ main)
+│   └── linux-headers/            # Linux 内核 UAPI 头文件 (@ master / sabotage-linux)
 │
 ├── scripts/                      # 【执行层】模块化独立步骤流水线
 │   ├── common.sh                 # 公共基础设施（日志、时间戳打标、断点续传下载、工具探测）
@@ -219,10 +220,11 @@ riscv-llvm-musl-toolchain/
 ├── patches/                      # 【拓展层】组件补丁目录（自动检测应用）
 │   ├── llvm/                     # LLVM 自定义补丁 (*.patch)
 │   ├── musl/                     # Musl 自定义补丁 (*.patch)
-│   └── torch-mlir/               # torch-mlir 自定义补丁 (*.patch)
+│   ├── torch-mlir/               # torch-mlir 自定义补丁 (*.patch)
+│   └── linux-headers/            # linux-headers 自定义补丁 (*.patch)
 │
-├── linux-headers/                # Linux 内核 UAPI 头文件（版本 6.16，系统调用与 POSIX 基础）
-├── .gitmodules                   # Git Submodule 配置声明 (llvm, musl, torch-mlir)
+├── linux-headers/                # 根目录兼容软链接 (指向 third_party/linux-headers)
+├── .gitmodules                   # Git Submodule 配置声明 (llvm, musl, torch-mlir, linux-headers)
 ├── .gitignore                    # 忽略构建缓存与本地配置
 └── README.md                     # 架构与使用文档
 ```
@@ -233,7 +235,7 @@ riscv-llvm-musl-toolchain/
 
 | 组件 | 仓库地址 (Upstream) | 固定版本 / 分支 / Commit | 选型与版本考量 |
 | :--- | :--- | :--- | :--- |
-| **LLVM** | [llvm/llvm-project](https://github.com/llvm/llvm-project.git) | `ca7933e4` (`release/20.x`) | **RISC-V 生态成熟度最高**的主版本，对 RVV 1.0 矢量扩展、Zba/Zbb/Zbc 位操作与 Zicbo* 指令集支持完备，且已收敛稳定，内建包含 MLIR 与 compiler-rt。 |
+| **LLVM** | [llvm/llvm-project](https://github.com/llvm/llvm-project.git) | `0d261d1c` (`release/23.x` / `llvmorg-23.1.3`) | **官方最新发布主版本**，对 RVV 1.0 矢量扩展、Zba/Zbb/Zbc/Zicbo* 位操作与最新指令集提供最前沿的调度模型与优化 Pass，内建包含最新 MLIR 与 compiler-rt。 |
 | **Musl libc** | [kraj/musl](https://github.com/kraj/musl.git) | `9fa28ece` (`v1.2.6` / `master`) | Khem Raj 维护的 OpenEmbedded/Yocto musl 核心仓库，针对 RISC-V 架构系统调用与浮点 ABI 进行了交叉编译增强，全 64 位 `time_t`，代码极度精简易于无 GCC 自举。 |
 | **torch-mlir** | [llvm/torch-mlir](https://github.com/llvm/torch-mlir.git) | `486a0be1` (`main`) | LLVM 官方 PyTorch 到 MLIR 前端编译器项目。作为 Git Submodule 纳入统一工程化管理，并支持通过 `--torch-mlir-src` 自由挂载本地开发分支。 |
-| **linux-headers**| [Linux Kernel UAPI](https://git.kernel.org) | Linux 6.16 UAPI 头文件 | 提供 RISC-V 目标所需的底层 Linux 系统调用定义（如 `riscv_hwprobe`）。**工程化考量**：完整内核源码树高达 5GB+，若直接作为 submodule 会极大拖慢克隆；因此仓库内置经过 `make headers_install ARCH=riscv` 导出的纯净 UAPI 头文件（仅 9MB），保证离线、秒级、自包含构建。 |
+| **linux-headers**| [sabotage-linux/kernel-headers](https://github.com/sabotage-linux/kernel-headers.git) | `master` (Git Submodule) | 面向 Musl libc 优化的轻量级 Linux 内核 UAPI 头文件仓库，专为 RISC-V 目标交叉编译适配，提供必要的系统调用与底层头文件。作为 Git Submodule 纳入 `third_party/linux-headers` 统一工程化管理。 |

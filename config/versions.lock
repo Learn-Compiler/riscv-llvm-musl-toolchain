@@ -1,0 +1,23 @@
+# ==============================================================================
+# config/versions.lock - 官方版本锁定清单 (LLVM 23.1 最新发布基准)
+# ==============================================================================
+# 本文件为工具链核心三元组版本绑定的单一事实来源 (Single Source of Truth)。
+# 支持填写: 分支名 (如 release/23.x)、发行版标签 (如 llvmorg-23.1.3) 或 40 位 Git Commit SHA。
+# 亦可通过命令行参数 (如 ./build.sh --llvm-version <REF>) 或环境变量临时覆盖。
+# ==============================================================================
+
+# 1. LLVM 核心版本 (主导基准，最新发布版 23.1)
+LLVM_REF="${LLVM_REF:-release/23.x}"
+LLVM_REPO="${LLVM_REPO:-https://github.com/llvm/llvm-project.git}"
+
+# 2. torch-mlir 对齐版本 (对应 LLVM 23.x 的 main 或锁定 commit)
+TORCH_MLIR_REF="${TORCH_MLIR_REF:-main}"
+TORCH_MLIR_REPO="${TORCH_MLIR_REPO:-https://github.com/llvm/torch-mlir.git}"
+
+# 3. 目标端 Musl C 运行库 (稳定版本)
+MUSL_REF="${MUSL_REF:-v1.2.5}"
+MUSL_REPO="${MUSL_REPO:-https://github.com/kraj/musl.git}"
+
+# 4. Linux 内核 UAPI 头文件 (轻量级 Musl 专用，存放于 third_party/linux-headers)
+LINUX_HEADERS_REF="${LINUX_HEADERS_REF:-master}"
+LINUX_HEADERS_REPO="${LINUX_HEADERS_REPO:-https://github.com/sabotage-linux/kernel-headers.git}"

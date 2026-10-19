@@ -36,7 +36,7 @@ description: >-
 | 步骤名 (`--step`) | 对应脚本 | 阶段职责说明 |
 | :--- | :--- | :--- |
 | `bootstrap` | [`scripts/bootstrap.sh`](../../scripts/bootstrap.sh) | 探测并下载免 root 引导工具 (Clang/CMake/Ninja)，探测宿主 C++ 运行时 |
-| `fetch` | [`scripts/fetch.sh`](../../scripts/fetch.sh) | 初始化并检出 `third_party` 子模组 (llvm, musl, torch-mlir)，应用必要补丁 |
+| `fetch` | [`scripts/fetch.sh`](../../scripts/fetch.sh) | 初始化并检出 `third_party` 子模组 (llvm, musl, torch-mlir, linux-headers)，应用必要补丁 |
 | `builtins` | [`scripts/builtins.sh`](../../scripts/builtins.sh) | 跨架构编译 compiler-rt builtins 与 crtbegin/crtend (别名: `compiler-rt`) |
 | `musl` | [`scripts/musl.sh`](../../scripts/musl.sh) | 编译 Musl libc 并安装至 Sysroot (`install-clang-musl/riscv64-unknown-linux-musl`) |
 | `llvm` | [`scripts/llvm.sh`](../../scripts/llvm.sh) | 构建宿主 LLVM 工具链及目标端完整运行时 (compiler-rt, libc++, libunwind) |
@@ -108,11 +108,13 @@ description: >-
 
 ## 4. 关键配置文件与环境变量
 
-1. **全局默认配置**：[`config/default.env`](../../config/default.env)
+1. **版本锁定清单（单一事实源）**：[`config/versions.lock`](../../config/versions.lock)
+   - 固化 `LLVM_REF`（默认 `release/23.x`）、`TORCH_MLIR_REF`、`MUSL_REF`（`v1.2.5`）、`LINUX_HEADERS_REF`（`master`）。
+2. **全局默认配置**：[`config/default.env`](../../config/default.env)
    - 包含三元组、目标架构、构建目录名、默认 `LLVM_ENABLE_PROJECTS` 等。
-2. **本地环境覆盖**：[`config/local.env`](../../config/local.env) (由 `config/local.env.example` 复制)
-   - 优先级最高，可覆盖 `JOBS`、`BUILD_TYPE`、`LLVM_SRC`、`LLVM_EXTRA_CMAKE_ARGS` 等，且已被 `.gitignore` 忽略。
-3. **架构特异性配置**：`config/targets/<target>.env`
+3. **本地环境覆盖**：[`config/local.env`](../../config/local.env) (由 `config/local.env.example` 复制)
+   - 优先级最高，可覆盖 `JOBS`、`BUILD_TYPE`、`LLVM_REF`、`LLVM_SRC`、`LLVM_EXTRA_CMAKE_ARGS` 等，且已被 `.gitignore` 忽略。
+4. **架构特异性配置**：`config/targets/<target>.env`
    - 目前默认 `riscv64-linux-musl.env`。
 
 ---

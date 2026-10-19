@@ -52,8 +52,11 @@ show_help() {
   ./build.sh --no-assertions     显式关闭 LLVM 断言
   ./build.sh --strip             强制剥离宿主程序符号 (Strip)
   ./build.sh --no-strip          保留宿主程序与库调试符号
-  ./build.sh --torch-mlir-version <REF> 指定特定的 torch-mlir 版本/Commit (默认由 LLVM 版本自动对齐)
-  ./build.sh --strict-versions    开启严格版本校验 (LLVM 与 torch-mlir 不匹配时报错中止)
+  ./build.sh --llvm-version <REF>       指定 LLVM 版本/分支/Tag/Commit (默认: release/23.x)
+  ./build.sh --torch-mlir-version <REF> 指定 torch-mlir 版本/分支/Tag/Commit
+  ./build.sh --musl-version <REF>       指定 Musl 版本/分支/Tag/Commit (默认: v1.2.5)
+  ./build.sh --linux-headers-version <REF> 指定 linux-headers 版本/分支/Tag (默认: master)
+  ./build.sh --strict-versions          开启严格版本校验 (LLVM 与 torch-mlir 不匹配时报错中止)
 
 模块流水线与维护选项:
   ./build.sh --step <步骤名>     单独执行某一特定步骤 (可多次指定，如 --step musl --step llvm)
@@ -102,7 +105,9 @@ CLI_DEFAULT_STATIC_LINK=""
 CLI_LLVM_PROJECTS=""
 CLI_ENABLE_MLIR=0
 CLI_ENABLE_TORCH_MLIR=0
+CLI_LLVM_REF=""
 CLI_TORCH_MLIR_REF=""
+CLI_MUSL_REF=""
 CLI_STRICT_VERSIONS=0
 CLI_LLVM_TARGETS=""
 CLI_LLVM_RUNTIMES=""
@@ -111,6 +116,8 @@ CLI_MUSL_EXTRA_ARGS=()
 CLI_TORCH_MLIR_SRC=""
 CLI_LLVM_SRC=""
 CLI_MUSL_SRC=""
+CLI_LINUX_HEADERS_REF=""
+CLI_LINUX_HEADERS_SRC=""
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -209,9 +216,29 @@ while [ $# -gt 0 ]; do
       CLI_TORCH_MLIR_SRC="$2"
       shift 2
       ;;
+    --llvm-version|--llvm-ref)
+      [ -n "${2:-}" ] || die "$1 需要指定 LLVM 版本 (如 \"release/23.x\"、\"llvmorg-23.1.3\" 或 Commit SHA)"
+      CLI_LLVM_REF="$2"
+      shift 2
+      ;;
     --torch-mlir-version|--torch-mlir-ref)
-      [ -n "${2:-}" ] || die "$1 需要指定版本或 Commit SHA"
+      [ -n "${2:-}" ] || die "$1 需要指定 torch-mlir 版本或 Commit SHA"
       CLI_TORCH_MLIR_REF="$2"
+      shift 2
+      ;;
+    --musl-version|--musl-ref)
+      [ -n "${2:-}" ] || die "$1 需要指定 Musl 版本或 Tag (如 \"v1.2.5\")"
+      CLI_MUSL_REF="$2"
+      shift 2
+      ;;
+    --linux-headers-version|--linux-headers-ref)
+      [ -n "${2:-}" ] || die "$1 需要指定 linux-headers 版本或分支 (如 \"master\")"
+      CLI_LINUX_HEADERS_REF="$2"
+      shift 2
+      ;;
+    --linux-headers-src)
+      [ -n "${2:-}" ] || die "--linux-headers-src 需要指定源码目录"
+      CLI_LINUX_HEADERS_SRC="$2"
       shift 2
       ;;
     --strict-versions)
@@ -324,7 +351,10 @@ fi
 if [ "${CLI_ENABLE_TORCH_MLIR:-0}" = 1 ]; then
   ENABLE_TORCH_MLIR=1
 fi
-[ -n "${CLI_TORCH_MLIR_REF:-}" ] && TORCH_MLIR_SHA="$CLI_TORCH_MLIR_REF"
+[ -n "${CLI_LLVM_REF:-}" ]       && LLVM_REF="$CLI_LLVM_REF" && LLVM_SHA="$CLI_LLVM_REF"
+[ -n "${CLI_TORCH_MLIR_REF:-}" ] && TORCH_MLIR_REF="$CLI_TORCH_MLIR_REF" && TORCH_MLIR_SHA="$CLI_TORCH_MLIR_REF"
+[ -n "${CLI_MUSL_REF:-}" ]       && MUSL_REF="$CLI_MUSL_REF" && MUSL_SHA="$CLI_MUSL_REF"
+[ -n "${CLI_LINUX_HEADERS_REF:-}" ] && LINUX_HEADERS_REF="$CLI_LINUX_HEADERS_REF"
 [ "${CLI_STRICT_VERSIONS:-0}" = 1 ] && STRICT_VERSIONS=1
 
 # 拼接额外的 CMake 与 Musl 参数
@@ -348,19 +378,24 @@ if [ "$ENABLE_SHARED" = "ON" ] && [ -z "$CLI_DEFAULT_STATIC_LINK" ]; then
   DEFAULT_STATIC_LINK="OFF"
 fi
 
-# 若显式通过参数指定了自研源码变更，自动清理 fetch 时间戳以触发更新
-if [ -n "$CLI_LLVM_SRC" ] || [ -n "$CLI_MUSL_SRC" ] || [ -n "$CLI_TORCH_MLIR_SRC" ]; then
+# 若显式通过参数指定了自研源码或特定版本变更，自动清理 fetch 时间戳以触发更新
+if [ -n "$CLI_LLVM_SRC" ] || [ -n "$CLI_MUSL_SRC" ] || [ -n "$CLI_TORCH_MLIR_SRC" ] || [ -n "$CLI_LINUX_HEADERS_SRC" ] || \
+   [ -n "$CLI_LLVM_REF" ] || [ -n "$CLI_TORCH_MLIR_REF" ] || [ -n "$CLI_MUSL_REF" ] || [ -n "$CLI_LINUX_HEADERS_REF" ]; then
   unmark fetch
+fi
+if [ -n "$CLI_LLVM_REF" ]; then
+  unmark builtins
+  unmark llvm
 fi
 
 # ─── 前置检查 ────────────────────────────────────────────────────────────
-[ -d "$SRC/linux-headers/include" ] || die "缺少 $SRC/linux-headers/include"
 command -v curl >/dev/null || die "缺少 curl"
 command -v tar  >/dev/null || die "缺少 tar"
 
 printf '%s%s 无 GCC 工具链构建%s\n' "$c_hd" "$TARGET_TRIPLE" "$c_off"
 printf '  SRC     = %s\n  INSTALL = %s\n  JOBS    = %s\n  BUILD   = %s (Runtimes: %s, Assertions: %s, Strip: %s, Shared: %s, DefaultStatic: %s)\n' "$SRC" "$INSTALL" "$JOBS" "$BUILD_TYPE" "$RUNTIMES_BUILD_TYPE" "$ENABLE_ASSERTIONS" "$STRIP_SYMBOLS" "$ENABLE_SHARED" "$DEFAULT_STATIC_LINK"
 printf '  PROJECTS= %s\n  TARGETS = %s\n' "${LLVM_ENABLE_PROJECTS:-clang;lld}" "${LLVM_TARGETS_TO_BUILD:-$LLVM_TARGET_ARCH}"
+printf '  VERSIONS= LLVM:%s | torch-mlir:%s | musl:%s | linux-headers:%s\n' "${LLVM_REF:-default}" "${TORCH_MLIR_REF:-default}" "${MUSL_REF:-default}" "${LINUX_HEADERS_REF:-default}"
 [ -n "${LLVM_EXTRA_CMAKE_ARGS:-}" ] && printf '  CMAKE_EXTRA = %s\n' "$LLVM_EXTRA_CMAKE_ARGS"
 
 # 引入所有步骤模块

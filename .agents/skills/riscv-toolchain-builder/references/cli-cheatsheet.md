@@ -28,9 +28,14 @@
 - `--runtimes <LIST>`：指定 LLVM 目标运行时（默认: `"compiler-rt;libcxx;libcxxabi;libunwind"`）。
 - `--cmake-args <ARGS>`：透传额外参数给 LLVM CMake（可多次传入）。
 - `--musl-args <ARGS>`：透传额外参数给 Musl `./configure`。
+- `--llvm-version <REF>`：指定 LLVM 分支、Tag 或 Commit SHA (默认: `release/23.x`)。
+- `--torch-mlir-version <REF>`：指定 torch-mlir 分支、Tag 或 Commit SHA。
+- `--musl-version <REF>`：指定 Musl 分支、Tag 或 Commit SHA (默认: `v1.2.5`)。
+- `--linux-headers-version <REF>`：指定 linux-headers 分支、Tag 或 Commit SHA (默认: `master`)。
 - `--torch-mlir-src <DIR>`：指定本地 torch-mlir 源码路径。
 - `--llvm-src <DIR>`：挂载本地自定义 LLVM 源码目录（无需重新检出）。
 - `--musl-src <DIR>`：挂载本地自定义 Musl 源码目录（无需重新检出）。
+- `--linux-headers-src <DIR>`：挂载本地自定义 linux-headers 源码目录（无需重新检出）。
 
 ### 流程控制与维护
 - `--step <NAME>`：单独执行某一特定步骤（如 `musl`, `llvm`, `verify`, `torch-mlir`）。
