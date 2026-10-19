@@ -1,9 +1,13 @@
 --- a/CMakeLists.txt
 +++ b/CMakeLists.txt
-@@ -131,3 +131,5 @@
+@@ -134,7 +134,9 @@ if(TORCH_MLIR_OUT_OF_TREE_BUILD)
+ 
    # Don't try to compile the python extensions at the moment. We need
    # to import lots of dependencies from AddMLIRPython to make this work.
 -  set(MLIR_ENABLE_BINDINGS_PYTHON ON)
 +  if(NOT DEFINED MLIR_ENABLE_BINDINGS_PYTHON)
 +    set(MLIR_ENABLE_BINDINGS_PYTHON ON)
 +  endif()
+ 
+   set(TORCH-MLIR_BUILT_STANDALONE ON)
+   set(BACKEND_PACKAGE_STRING "LLVM ${LLVM_PACKAGE_VERSION}")

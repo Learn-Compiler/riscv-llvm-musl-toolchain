@@ -1,0 +1,20 @@
+--- a/include/torch-mlir/Dialect/Torch/IR/TorchOps.td
++++ b/include/torch-mlir/Dialect/Torch/IR/TorchOps.td
+@@ -106,8 +106,6 @@ def Torch_ClassTypeTerminatorOp : Torch_Op<"class_type.terminator", [
+ //===----------------------------------------------------------------------===//
+ 
+ def Torch_ClassTypeOp : Torch_Op<"class_type", [
+-    SymbolName,
+-    SymbolVisibility,
+     Symbol,
+     SingleBlockImplicitTerminator<"::mlir::torch::Torch::ClassTypeTerminatorOp">]> {
+   let summary = "Constructs a torch.ClassType";
+@@ -232,8 +230,6 @@ def Torch_ClassTypeOp : Torch_Op<"class_type", [
+ //===----------------------------------------------------------------------===//
+ 
+ def Torch_GlobalSlotOp : Torch_Op<"global_slot", [
+-    SymbolName,
+-    SymbolVisibility,
+     Symbol,
+   ]> {
+   let summary = "A slot with global storage";
