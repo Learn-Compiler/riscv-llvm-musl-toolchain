@@ -37,27 +37,23 @@ step_torch_mlir() {
     return
   fi
 
+  # 若 third_party/torch-mlir 为遗留的外部软链接且未显式指定 --torch-mlir-src，自动切断并清理旧缓存
+  if [ -L "$SRC/third_party/torch-mlir" ] && [ -z "${CLI_TORCH_MLIR_SRC:-}" ]; then
+    warn "检测到 third_party/torch-mlir 为外部陈旧版本软链接，正在自动清理并切回对齐源码 ..."
+    rm -f "$SRC/third_party/torch-mlir"
+    rm -rf "$SRC/build-torch-mlir"
+  fi
+
   local torch_src="${TORCH_MLIR_SRC:-$SRC/third_party/torch-mlir}"
   if [ ! -d "$torch_src" ] || [ ! -f "$torch_src/CMakeLists.txt" ]; then
-    # 尝试自动发现宿主已有的源码或拉取
-    local local_cand=""
-    for cand in "/home/compiler-1/work/compiler/torch-mlir" "/home/compiler-1/learn/torch-mlir"; do
-      if [ -f "$cand/CMakeLists.txt" ]; then
-        local_cand="$cand"
-        break
-      fi
-    done
-    if [ -n "$local_cand" ]; then
-      log "自动关联本地已有的 torch-mlir 源码 ($local_cand)"
-      mkdir -p "$SRC/third_party"
-      ln -sfn "$local_cand" "$SRC/third_party/torch-mlir"
-      torch_src="$SRC/third_party/torch-mlir"
-    else
-      log "torch-mlir 源码未就绪，正在克隆 upstream ..."
-      mkdir -p "$SRC/third_party"
-      git clone --depth 1 "${TORCH_MLIR_REPO:-https://github.com/llvm/torch-mlir.git}" "$SRC/third_party/torch-mlir" || true
-      torch_src="$SRC/third_party/torch-mlir"
-    fi
+    log "torch-mlir 源码未就绪，正在拉取锁定版本 (${TORCH_MLIR_REF:-main}) ..."
+    # shellcheck disable=SC1091
+    source "$SCRIPT_DIR/fetch.sh"
+    checkout_repo_ref "$SRC/third_party/torch-mlir" "${TORCH_MLIR_REPO:-https://github.com/llvm/torch-mlir.git}" "${TORCH_MLIR_REF:-main}" "CMakeLists.txt" "torch-mlir"
+    torch_src="$SRC/third_party/torch-mlir"
+
+    # 应用 torch-mlir 工程补丁
+    apply_patches "torch-mlir" "$torch_src"
   fi
 
   if [ ! -d "$torch_src" ] || [ ! -f "$torch_src/CMakeLists.txt" ]; then
@@ -92,7 +88,7 @@ step_torch_mlir() {
   # 版本相容性探测与自检
   align_and_check_torch_mlir_version "$torch_src"
 
-  log "4b/5 配置并构建 torch-mlir (源码: $torch_src)"
+  log "配置并构建 torch-mlir (源码: $torch_src)"
   local TORCH_BUILD="$SRC/build-torch-mlir"
   mkdir -p "$TORCH_BUILD"
 
@@ -107,7 +103,7 @@ step_torch_mlir() {
     enable_stablehlo="ON"
   fi
 
-  log "4b/5 执行 CMake 配置 (Out-of-tree, StableHLO: $enable_stablehlo, Python: ${TORCH_MLIR_ENABLE_PYTHON:-OFF})"
+  log "执行 CMake 配置 (Out-of-tree, StableHLO: $enable_stablehlo, Python: ${TORCH_MLIR_ENABLE_PYTHON:-OFF})"
 
   # 注意：torch-mlir 运行在宿主机上，需使用 $BOOT 引导编译器与 $HOST_CXX_FLAGS 编译，
   # 避免误用以 riscv64 musl 为默认目标的目标端 clang
@@ -131,12 +127,14 @@ step_torch_mlir() {
     -DTORCH_MLIR_ENABLE_STABLEHLO="$enable_stablehlo" \
     -DMLIR_ENABLE_BINDINGS_PYTHON="${TORCH_MLIR_ENABLE_PYTHON:-OFF}" \
     -DTORCH_MLIR_ENABLE_PYTORCH_EXTENSIONS=OFF \
+    -DTORCH_MLIR_INCLUDE_TESTS=OFF \
+    -DLLVM_INCLUDE_TESTS=OFF \
     "${extra_torch_flags[@]}"
 
-  log "4b/5 编译 torch-mlir (-j$JOBS)"
+  log "编译 torch-mlir (-j$JOBS)"
   "$BOOT/bin/ninja" -C "$TORCH_BUILD" -j"$JOBS"
 
-  log "4b/5 安装 torch-mlir"
+  log "安装 torch-mlir"
   "$BOOT/bin/ninja" -C "$TORCH_BUILD" install
 
   mark torch_mlir

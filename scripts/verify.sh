@@ -40,7 +40,7 @@ verify_runtime_libs() {
 }
 
 step_verify() {
-  log "5/5 验证"
+  log "验证工具链与冒烟测试"
 
   [ -x "$INSTALL/bin/clang" ] || die "缺少编译器 $INSTALL/bin/clang，请先完成构建"
 

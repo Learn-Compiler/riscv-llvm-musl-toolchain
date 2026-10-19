@@ -14,7 +14,7 @@ step_bootstrap() {
     ok "引导工具已就绪，跳过"
     return
   fi
-  log "1/5 准备免 root 引导工具到 $BOOT"
+  log "准备免 root 引导工具到 $BOOT"
   mkdir -p "$BOOT/bin"
 
   # ---- cmake ----
@@ -92,7 +92,7 @@ step_bootstrap() {
 
 # 选定宿主 C++ 编译方式（决定 CMAKE_CXX_FLAGS 并持久化至 host_cxx_flags.env）
 step_host_cxx() {
-  log "1b/5 确定宿主 C++ 编译方式"
+  log "确定宿主 C++ 编译方式"
   local probe="$BOOT/probe.cc"
   cat > "$probe" <<'EOF'
 #include <vector>

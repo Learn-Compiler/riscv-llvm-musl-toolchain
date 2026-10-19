@@ -10,7 +10,7 @@ source "$SCRIPT_DIR/common.sh"
 init_config
 
 step_prune() {
-  log "4b/5 精简工具链（剥离无关工具、宿主符号，生成 .cfg 与三元组链接）"
+  log "精简工具链（剥离无关工具、宿主符号，生成 .cfg 与三元组链接）"
 
   [ -d "$INSTALL/bin" ] || die "未找到安装目录 $INSTALL/bin，请先完成构建"
 

@@ -14,7 +14,7 @@ step_llvm() {
     ok "LLVM + runtimes 已构建完成，跳过"
     return
   fi
-  log "4/5 配置 LLVM + runtimes"
+  log "配置 LLVM + runtimes"
   mkdir -p "$BUILD"
   ln -sfn "$SYSROOT" "$BUILD/sysroot"     # 构建期 clang 从 ../sysroot 找 sysroot
 
@@ -51,7 +51,7 @@ step_llvm() {
     read -r -a extra_cmake_flags <<< "${LLVM_EXTRA_CMAKE_ARGS}"
   fi
 
-  log "4/5 配置 LLVM + runtimes (子项目: $enable_projects, 后端架构: $targets_to_build, ToolchainOnly: $install_toolchain_only)"
+  log "配置 LLVM + runtimes (子项目: $enable_projects, 后端架构: $targets_to_build, ToolchainOnly: $install_toolchain_only)"
 
   "$BOOT/bin/cmake" -G Ninja -S "$LLVM_DIR/llvm" -B "$BUILD" \
     -DCMAKE_BUILD_TYPE="$BUILD_TYPE" \
@@ -118,10 +118,10 @@ step_llvm() {
     || die "COMPILER_RT_BUILD_CRT 未生效，检查上面的 cmake 参数"
   ok "cmake 配置完成（COMPILER_RT_BUILD_CRT=ON 已确认）"
 
-  log "4/5 编译（-j$JOBS，预计 30-60 分钟）"
+  log "编译 LLVM（-j$JOBS，预计 30-60 分钟）"
   "$BOOT/bin/ninja" -C "$BUILD" -j"$JOBS"
 
-  log "4/5 安装"
+  log "安装 LLVM"
   "$BOOT/bin/ninja" -C "$BUILD" install
 
   # C++ 运行库补进 sysroot
