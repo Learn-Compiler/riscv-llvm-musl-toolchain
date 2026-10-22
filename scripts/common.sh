@@ -16,7 +16,6 @@ BUILD="${BUILD:-$SRC/build-llvm-musl}"
 BUILD_RUNTIMES="${BUILD_RUNTIMES:-$SRC/build-runtimes}"
 BOOT="${BOOT:-$SRC/.bootstrap}"
 STAMPS="${STAMPS:-$SRC/.build-stamps}"
-SHIM="${SHIM:-$SRC/.musl-shim}"
 LLVM_DIR="${LLVM_DIR:-$SRC/third_party/llvm}"
 MUSL_DIR="${MUSL_DIR:-$SRC/third_party/musl}"
 LINUX_HEADERS_DIR="${LINUX_HEADERS_DIR:-$SRC/third_party/linux-headers}"
@@ -74,30 +73,6 @@ fetch_file() {   # $1=url $2=dest
   return 1
 }
 
-# ─── Git 精确 commit 拉取器 ─────────────────────────────────────────────
-fetch_commit() {   # $1=repo $2=sha $3=dest $4=检出后必须存在的哨兵文件
-  local repo="$1" sha="$2" dest="$3" sentinel="$4" i got
-  # 必须同时满足：工作区哨兵文件在 + git 目录在 + 目标提交在
-  if [ -e "$dest/$sentinel" ] && [ -d "$dest/.git" ] \
-     && git -C "$dest" cat-file -e "${sha}^{commit}" 2>/dev/null; then
-    ok "$(basename "$dest") 已就绪（含 ${sha:0:12}），跳过"
-    return
-  fi
-  echo "  拉取 $(basename "$dest") @ ${sha:0:12} ..."
-  rm -rf "$dest"
-  mkdir -p "$dest"
-  git -C "$dest" init -q
-  git -C "$dest" remote add origin "$repo"
-  got=0
-  for i in $(seq 1 10); do
-    if git -C "$dest" fetch --depth 1 origin "$sha" >/dev/null 2>&1; then got=1; break; fi
-    echo "    第 $i 次失败，10 秒后重试"; sleep 10
-  done
-  [ "$got" = 1 ] || die "拉取 $repo 失败（已重试 10 次）"
-  git -C "$dest" checkout -q -f FETCH_HEAD
-  [ -e "$dest/$sentinel" ] || die "$(basename "$dest") 检出后仍缺少 $sentinel"
-  git -C "$dest" log -1 --format='  ✓ %h %ad %s' --date=short
-}
 
 # ─── 加载配置函数 ────────────────────────────────────────────────────────
 init_config() {

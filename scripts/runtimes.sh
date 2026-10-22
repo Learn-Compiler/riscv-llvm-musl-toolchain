@@ -36,13 +36,6 @@ step_runtimes() {
 
   # ─── 2. 编译目标 C 运行库 Musl (libc.a) ───────────────────────────
   log "使用已构建的 LLVM 编译目标 C 运行库 Musl (libc.a)"
-  mkdir -p "$SHIM"
-  ln -sf "$target_ar" "$SHIM/${MUSL_TARGET}-ar"
-  ln -sf "$target_ranlib" "$SHIM/${MUSL_TARGET}-ranlib"
-  ln -sf "$target_strip" "$SHIM/${MUSL_TARGET}-strip"
-  ln -sf "$target_nm" "$SHIM/${MUSL_TARGET}-nm"
-  ln -sf "$target_objcopy" "$SHIM/${MUSL_TARGET}-objcopy"
-  export PATH="$SHIM:$BOOT/bin:$PATH"
 
   cd "$MUSL_DIR"
   make distclean >/dev/null 2>&1 || true

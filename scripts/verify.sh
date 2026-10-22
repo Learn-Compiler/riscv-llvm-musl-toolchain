@@ -11,35 +11,6 @@ init_config
 
 # 验证目标运行库（静态库/共享库）
 verify_runtime_libs() {
-  # 确保运行时库已从 install 目录补入 sysroot
-  local rtdir="$INSTALL/lib/$T"
-  [ -d "$rtdir" ] || rtdir="$BUILD/lib/$T"
-
-  # 确保静态 libc++.a 包含 libc++abi 符号（clang++ 静态链接只自动传 -lc++）
-  if [ -f "$rtdir/libc++.a" ] && [ -f "$rtdir/libc++abi.a" ] && [ -x "$INSTALL/bin/llvm-nm" ] && [ -x "$INSTALL/bin/llvm-ar" ]; then
-    if ! "$INSTALL/bin/llvm-nm" "$rtdir/libc++.a" 2>/dev/null | grep -q 'T __cxa_allocate_exception'; then
-      local mri_script="/tmp/merge_libcxx_verify.mri"
-      cat > "$mri_script" <<MRIEOF
-CREATE $rtdir/libc++_merged.a
-ADDLIB $rtdir/libc++.a
-ADDLIB $rtdir/libc++abi.a
-SAVE
-END
-MRIEOF
-      "$INSTALL/bin/llvm-ar" -M < "$mri_script"
-      mv -f "$rtdir/libc++_merged.a" "$rtdir/libc++.a"
-      rm -f "$mri_script"
-    fi
-  fi
-
-  if [ -d "$rtdir" ]; then
-    mkdir -p "$SYSROOT/usr/lib" "$SYSROOT/lib"
-    cp -a "$rtdir"/libc++*   "$SYSROOT/usr/lib/" 2>/dev/null || true
-    cp -a "$rtdir"/libunwind* "$SYSROOT/usr/lib/" 2>/dev/null || true
-    cp -a "$rtdir"/libc++*   "$SYSROOT/lib/" 2>/dev/null || true
-    cp -a "$rtdir"/libunwind* "$SYSROOT/lib/" 2>/dev/null || true
-  fi
-
   # --- 目标静态运行库检查 ---
   [ -f "$SYSROOT/usr/lib/libc.a" ] || die "缺少静态 C 运行库: $SYSROOT/usr/lib/libc.a"
   ok "找到静态 libc.a"

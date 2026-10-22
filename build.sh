@@ -455,9 +455,7 @@ source "$SRC/scripts/bootstrap.sh"
 # shellcheck disable=SC1091
 source "$SRC/scripts/fetch.sh"
 # shellcheck disable=SC1091
-source "$SRC/scripts/builtins.sh"
 # shellcheck disable=SC1091
-source "$SRC/scripts/musl.sh"
 # shellcheck disable=SC1091
 source "$SRC/scripts/llvm.sh"
 # shellcheck disable=SC1091
@@ -481,11 +479,9 @@ run_step() {
     fetch)
       step_fetch
       ;;
-    builtins|compiler-rt|compiler_rt)
-      step_builtins
-      ;;
-    musl)
-      step_musl
+    builtins|compiler-rt|compiler_rt|musl)
+      warn "步骤 $step 已统一合并至 runtimes，自动调用 step_runtimes ..."
+      step_runtimes
       ;;
     llvm)
       step_llvm

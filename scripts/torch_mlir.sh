@@ -11,7 +11,7 @@ source "$SCRIPT_DIR/common.sh"
 align_and_check_torch_mlir_version() {
   local torch_src="$1"
   local current_llvm
-  current_llvm=$(git -C "$LLVM_DIR" rev-parse HEAD 2>/dev/null || echo "${LLVM_SHA:-unknown}")
+  current_llvm=$(git -C "$LLVM_DIR" rev-parse HEAD 2>/dev/null || echo "unknown")
 
   local torch_pinned_llvm
   torch_pinned_llvm=$(git -C "$torch_src" rev-parse HEAD:externals/llvm-project 2>/dev/null || true)

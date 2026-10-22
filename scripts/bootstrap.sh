@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# scripts/bootstrap.sh - 准备引导工具（优先本地宿主工具，缺失时自动回退下载）
+# scripts/bootstrap.sh - 探测并准备宿主引导工具链（本地优先策略）
 # ==============================================================================
 set -euo pipefail
 
@@ -28,7 +28,6 @@ step_bootstrap() {
   fi
   log "准备引导工具到 $BOOT (优先检测宿主本地工具链)"
   mkdir -p "$BOOT/bin"
-  # 清理可能存在的损坏软链接
   find "$BOOT/bin" -xtype l -delete 2>/dev/null || true
 
   # ---- 1. cmake (优先本地 >= 3.20) ----
@@ -83,6 +82,8 @@ step_bootstrap() {
   if [ -n "$sys_make" ]; then
     ln -sf "$sys_make" "$BOOT/bin/make"
     ok "使用宿主本地 make ($("$sys_make" --version | head -1 | awk '{print $3}'))"
+  else
+    die "未检测到 make，请先安装 make (如 apt install -y make)"
   fi
 
   # ---- 4. 宿主 C/C++ 编译器 (优先本地) ----
@@ -101,47 +102,26 @@ step_bootstrap() {
     sys_cc="$f_gcc"
     sys_cxx="$f_gxx"
     ok "检测到宿主 GCC 编译器: $("$sys_cxx" --version | head -1)"
+  else
+    die "未检测到宿主 C/C++ 编译器 (clang/gcc)，请先安装基础编译工具 (如 apt-get install -y build-essential clang)"
   fi
 
-  if [ -n "$sys_cxx" ]; then
-    ln -sf "$sys_cc" "$BOOT/bin/clang"
-    ln -sf "$sys_cxx" "$BOOT/bin/clang++"
-    local sys_lld
-    sys_lld="$(find_system_binary ld.lld || find_system_binary lld || true)"
-    if [ -n "$sys_lld" ]; then
-      ln -sf "$sys_lld" "$BOOT/bin/ld.lld"
-      ln -sf "$sys_lld" "$BOOT/bin/lld"
-    fi
-    for t in ar ranlib strip nm objcopy; do
-      local sys_tool
-      sys_tool="$(find_system_binary "llvm-$t" || find_system_binary "$t" || true)"
-      if [ -n "$sys_tool" ]; then
-        ln -sf "$sys_tool" "$BOOT/bin/llvm-$t"
-      fi
-    done
-    ok "宿主本地编译器与构建工具已接入引导环境（跳过下载 1.1GB 预编译包）"
-  else
-    # 宿主缺少编译器时回退到下载预编译包与 deb
-    local LD="$BOOT/$LLVM_PREBUILT"
-    if [ ! -x "$LD/bin/clang" ]; then
-      echo "  宿主缺失现代化编译器，从网络下载 LLVM 18.1.8 官方预编译（约 1.1GB）..."
-      fetch_file "$LLVM_PREBUILT_URL" "$BOOT/llvm.tar.xz"
-      tar -xJf "$BOOT/llvm.tar.xz" -C "$BOOT"
-    fi
-    for t in clang clang++ lld ld.lld llvm-ar llvm-ranlib llvm-strip llvm-nm \
-             llvm-objcopy llvm-objdump llvm-ranlib; do
-      [ -x "$LD/bin/$t" ] && ln -sf "$LD/bin/$t" "$BOOT/bin/$t"
-    done
-    local DEBS="$BOOT/debs" ROOT="$BOOT/root"
-    mkdir -p "$DEBS" "$ROOT"
-    ( cd "$DEBS"
-      for p in make "libstdc++-$HOST_GCC_VER-dev" "libgcc-$HOST_GCC_VER-dev"; do
-        ls "${p}"_*.deb >/dev/null 2>&1 || apt-get download "$p" >/dev/null 2>&1 || true
-      done )
-    fetch_file "$TINFO5_URL" "$DEBS/libtinfo5.deb" 2>/dev/null || true
-    for d in "$DEBS"/*.deb; do dpkg -x "$d" "$ROOT" 2>/dev/null || true; done
-    [ -x "$ROOT/usr/bin/make" ] && ln -sf "$ROOT/usr/bin/make" "$BOOT/bin/make"
+  ln -sf "$sys_cc" "$BOOT/bin/clang"
+  ln -sf "$sys_cxx" "$BOOT/bin/clang++"
+  local sys_lld
+  sys_lld="$(find_system_binary ld.lld || find_system_binary lld || true)"
+  if [ -n "$sys_lld" ]; then
+    ln -sf "$sys_lld" "$BOOT/bin/ld.lld"
+    ln -sf "$sys_lld" "$BOOT/bin/lld"
   fi
+  for t in ar ranlib strip nm objcopy; do
+    local sys_tool
+    sys_tool="$(find_system_binary "llvm-$t" || find_system_binary "$t" || true)"
+    if [ -n "$sys_tool" ]; then
+      ln -sf "$sys_tool" "$BOOT/bin/llvm-$t"
+    fi
+  done
+  ok "宿主本地编译器与构建工具已接入引导环境"
 
   mark bootstrap
 }
@@ -150,14 +130,13 @@ step_bootstrap() {
 step_host_cxx() {
   log "确定宿主 C++ 编译方式"
   local probe="$BOOT/probe.cc"
-  cat > "$probe" <<'EOF'
+  cat > "$probe" <<'PROBE_EOF'
 #include <vector>
 #include <string>
 #include <iostream>
 int main(){ std::vector<std::string> v{"a"}; std::cout << v.size(); return 0; }
-EOF
+PROBE_EOF
 
-  # 方案 0：原生宿主编译器直接编译探针
   local lld_flag=""
   if [ -x "$BOOT/bin/ld.lld" ]; then
     lld_flag="-fuse-ld=lld"
@@ -180,29 +159,7 @@ EOF
     return
   fi
 
-  # 方案 1：解包的 libstdc++
-  local gccdir="$BOOT/root/usr/lib/gcc/$HOST_TRIPLE/$HOST_GCC_VER"
-  local lld="-fuse-ld=lld"
-  if [ -d "$gccdir" ]; then
-    if "$BOOT/bin/clang++" "--gcc-install-dir=$gccdir" $lld "$probe" -o /dev/null 2>/dev/null; then
-      HOST_CXX_FLAGS="--gcc-install-dir=$gccdir -Qunused-arguments"
-      HOST_LINK_FLAGS="$lld"
-      echo "export HOST_CXX_FLAGS=\"$HOST_CXX_FLAGS\"" > "$BOOT/host_cxx_flags.env"
-      echo "export HOST_LINK_FLAGS=\"$HOST_LINK_FLAGS\"" >> "$BOOT/host_cxx_flags.env"
-      ok "宿主 C++：libstdc++ (--gcc-install-dir=$gccdir) + ld.lld"
-      return
-    fi
-  fi
-  # 方案 2：自带 libc++
-  if "$BOOT/bin/clang++" -stdlib=libc++ $lld "$probe" -o /dev/null 2>/dev/null; then
-    HOST_CXX_FLAGS="-stdlib=libc++ -Qunused-arguments"
-    HOST_LINK_FLAGS="$lld"
-    echo "export HOST_CXX_FLAGS=\"$HOST_CXX_FLAGS\"" > "$BOOT/host_cxx_flags.env"
-    echo "export HOST_LINK_FLAGS=\"$HOST_LINK_FLAGS\"" >> "$BOOT/host_cxx_flags.env"
-    ok "宿主 C++：libc++ (预编译包自带) + ld.lld"
-    return
-  fi
-  die "找不到可用的宿主 C++ 标准库，无法编译 LLVM"
+  die "宿主 C++ 编译器无法编译基础测试程序，请检查宿主开发环境与 C++ 标准库"
 }
 
 # 独立运行支持
