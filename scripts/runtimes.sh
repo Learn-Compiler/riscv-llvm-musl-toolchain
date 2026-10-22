@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# scripts/runtimes.sh - 使用编译好的 Clang 独立构建目标运行库 (compiler-rt crt / libunwind / libc++)
+# scripts/runtimes.sh - 编译目标全套运行时 (libc.a / builtins / crt / libunwind / libc++)
 # ==============================================================================
 set -euo pipefail
 
@@ -11,27 +11,81 @@ init_config
 
 step_runtimes() {
   if is_done runtimes; then
-    ok "C++ 运行库 (libc++/libunwind) 已构建完成，跳过"
+    ok "目标全套运行库已构建完成，跳过"
     return
   fi
-  log "配置并构建目标运行库 (compiler-rt crt / libunwind / libc++ / libc++abi)"
+  log "构建目标运行库全集 (libc.a / builtins / crtbegin / libunwind / libc++)"
 
   local target_clang="$INSTALL/bin/clang"
   local target_clangxx="$INSTALL/bin/clang++"
   local target_ar="$INSTALL/bin/llvm-ar"
   local target_nm="$INSTALL/bin/llvm-nm"
   local target_ranlib="$INSTALL/bin/llvm-ranlib"
+  local target_strip="$INSTALL/bin/llvm-strip"
+  local target_objcopy="$INSTALL/bin/llvm-objcopy"
 
   [ -x "$target_clang" ] || die "未找到编译器 $target_clang，请先完成 ./build.sh --step llvm"
-  [ -f "$SYSROOT/usr/lib/libc.a" ] || die "缺少 sysroot libc.a，请先完成 ./build.sh --step musl"
 
+  # ─── 1. 准备 Sysroot 基础环境与 Linux 内核头文件 ───────────────────
+  log "准备 Linux 内核头文件到 Sysroot"
+  mkdir -p "$SYSROOT/usr/include" "$SYSROOT/usr/lib" "$SYSROOT/lib"
+  local hdr_dir
+  hdr_dir="$(get_linux_headers_include_dir)"
+  [ -d "$hdr_dir" ] || die "缺少 Linux 内核头文件目录: $hdr_dir"
+  cp -rL "$hdr_dir/." "$SYSROOT/usr/include/"
+
+  # ─── 2. 编译目标 C 运行库 Musl (libc.a) ───────────────────────────
+  log "使用已构建的 LLVM 编译目标 C 运行库 Musl (libc.a)"
+  mkdir -p "$SHIM"
+  ln -sf "$target_ar" "$SHIM/${MUSL_TARGET}-ar"
+  ln -sf "$target_ranlib" "$SHIM/${MUSL_TARGET}-ranlib"
+  ln -sf "$target_strip" "$SHIM/${MUSL_TARGET}-strip"
+  ln -sf "$target_nm" "$SHIM/${MUSL_TARGET}-nm"
+  ln -sf "$target_objcopy" "$SHIM/${MUSL_TARGET}-objcopy"
+  export PATH="$SHIM:$BOOT/bin:$PATH"
+
+  cd "$MUSL_DIR"
+  make distclean >/dev/null 2>&1 || true
+
+  local musl_shared_flags=()
+  if [ "${ENABLE_SHARED:-OFF}" = "ON" ]; then
+    musl_shared_flags=("--enable-shared")
+  else
+    musl_shared_flags=("--disable-shared")
+  fi
+
+  local musl_extra_flags=()
+  if [ -n "${MUSL_EXTRA_ARGS:-}" ]; then
+    read -r -a musl_extra_flags <<< "${MUSL_EXTRA_ARGS}"
+  fi
+
+  CC="$target_clang --target=$T -fuse-ld=lld" \
+  AR="$target_ar" \
+  RANLIB="$target_ranlib" \
+  ./configure \
+      --target="$MUSL_TARGET" \
+      --prefix=/usr \
+      --syslibdir=/lib \
+      --disable-gcc-wrapper \
+      --enable-static \
+      "${musl_shared_flags[@]}" \
+      "${musl_extra_flags[@]}"
+
+  make -j"$JOBS" AR="$target_ar" RANLIB="$target_ranlib"
+  make DESTDIR="$SYSROOT" install
+
+  if [ "${ENABLE_SHARED:-OFF}" = "ON" ]; then
+    ln -sf ../usr/lib/libc.so "$SYSROOT/lib/$LD_MUSL_SO"
+  fi
+  cp -rL "$hdr_dir/." "$SYSROOT/usr/include/"
+  ok "目标 C 运行库 (libc.a) 编译并安装就绪"
+
+  # ─── 3. 构建 LLVM 目标运行库 (builtins / crt / libunwind / libc++) ───
+  log "编译 LLVM 目标运行库 (compiler-rt crt / builtins / libunwind / libc++ / libc++abi)"
   local RUNTIMES_BUILD="${BUILD_RUNTIMES:-$SRC/build-runtimes}"
   mkdir -p "$RUNTIMES_BUILD"
-
-  # 清理可能由旧版本 LLVM 遗留在 libcxx 中的陈旧头文件与断言冲突
   rm -rf "$RUNTIMES_BUILD/include/c++/v1" "$INSTALL/include/c++/v1"
 
-  log "配置目标运行库 CMake"
   "$BOOT/bin/cmake" -G Ninja \
     -S "$LLVM_DIR/runtimes" \
     -B "$RUNTIMES_BUILD" \
@@ -75,13 +129,40 @@ step_runtimes() {
     -DLIBUNWIND_USE_COMPILER_RT=ON \
     -DLLVM_PARALLEL_LINK_JOBS=1
 
-  log "编译目标运行库 (-j$JOBS)"
   "$BOOT/bin/ninja" -C "$RUNTIMES_BUILD" -j"$JOBS"
-
-  log "安装目标运行库到 $INSTALL"
   "$BOOT/bin/ninja" -C "$RUNTIMES_BUILD" install
 
-  # 将 libc++abi.a 合并进静态 libc++.a，解决静态链接只传 -lc++ 导致的 ABI 符号未定义
+  # ─── 4. 部署 compiler-rt crt 与 builtins ───────────────────────────
+  log "部署 compiler-rt crt (crtbegin/crtend) 与 builtins"
+  local clang_ver
+  clang_ver=$("$target_clang" -dumpversion 2>/dev/null | cut -d. -f1 || echo "23")
+  local inst_res="$INSTALL/lib/clang/$clang_ver/lib/$T"
+  mkdir -p "$inst_res"
+
+  for b in "$RUNTIMES_BUILD/compiler-rt/lib/linux/libclang_rt.builtins-riscv64.a" \
+           "$INSTALL/lib/linux/libclang_rt.builtins-riscv64.a" \
+           "$INSTALL/lib/$T/libclang_rt.builtins.a"; do
+    if [ -f "$b" ]; then
+      cp -a "$b" "$inst_res/libclang_rt.builtins.a"
+      cp -a "$b" "$inst_res/libclang_rt.builtins-riscv64.a"
+      cp -a "$b" "$SYSROOT/usr/lib/libclang_rt.builtins.a"
+      break
+    fi
+  done
+
+  for cdir in "$RUNTIMES_BUILD/compiler-rt/lib/linux" "$INSTALL/lib/linux"; do
+    if [ -f "$cdir/clang_rt.crtbegin-riscv64.o" ]; then
+      cp -a "$cdir/clang_rt.crtbegin-riscv64.o" "$inst_res/clang_rt.crtbegin.o"
+      cp -a "$cdir/clang_rt.crtend-riscv64.o"   "$inst_res/clang_rt.crtend.o"
+      cp -a "$cdir/clang_rt.crtbegin-riscv64.o" "$inst_res/crtbegin.o"
+      cp -a "$cdir/clang_rt.crtend-riscv64.o"   "$inst_res/crtend.o"
+      cp -a "$cdir/clang_rt.crtbegin-riscv64.o" "$SYSROOT/usr/lib/crtbegin.o" 2>/dev/null || true
+      cp -a "$cdir/clang_rt.crtend-riscv64.o"   "$SYSROOT/usr/lib/crtend.o" 2>/dev/null || true
+      break
+    fi
+  done
+
+  # ─── 5. 合并 libc++abi.a 到静态 libc++.a ────────────────────────────
   local inst_rtdir="$INSTALL/lib/$T"
   [ -d "$inst_rtdir" ] || inst_rtdir="$INSTALL/lib"
   if [ -f "$inst_rtdir/libc++.a" ] && [ -f "$inst_rtdir/libc++abi.a" ]; then
@@ -99,7 +180,7 @@ MRI_EOF
     rm -f "$mri_script"
   fi
 
-  # C++ 运行库补进 sysroot
+  # ─── 6. C++ 运行库与 libunwind 同步至 sysroot ─────────────────────
   mkdir -p "$SYSROOT/usr/lib" "$SYSROOT/lib"
   if [ -d "$inst_rtdir" ]; then
     cp -a "$inst_rtdir"/libc++*   "$SYSROOT/usr/lib/" 2>/dev/null || true
@@ -108,14 +189,15 @@ MRI_EOF
     cp -a "$inst_rtdir"/libunwind* "$SYSROOT/lib/" 2>/dev/null || true
   fi
 
-  # 若为纯静态模式，清理可能残留的目标端共享库
   if [ "${ENABLE_SHARED:-OFF}" = "OFF" ]; then
     rm -f "$SYSROOT"/usr/lib/libc++.so* "$SYSROOT"/usr/lib/libc++abi.so* "$SYSROOT"/usr/lib/libunwind.so* "$SYSROOT"/usr/lib/libc.so* "$SYSROOT"/usr/lib/"$LD_MUSL_SO" 2>/dev/null || true
     rm -f "$SYSROOT"/lib/libc++.so* "$SYSROOT"/lib/libc++abi.so* "$SYSROOT"/lib/libunwind.so* "$SYSROOT"/lib/libc.so* "$SYSROOT"/lib/"$LD_MUSL_SO" 2>/dev/null || true
   fi
 
+  mark musl
+  mark builtins
   mark runtimes
-  ok "目标运行库构建并安装完成"
+  ok "全部目标运行库 (libc.a / builtins / crtbegin / libunwind / libc++) 编译并安装完成"
 }
 
 # 独立运行支持

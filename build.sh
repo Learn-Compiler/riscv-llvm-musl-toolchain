@@ -75,7 +75,7 @@ show_help() {
   builtins    - 编译 compiler-rt builtins 与 crt (亦支持别名 --step compiler-rt)
   musl        - 编译 Musl libc 并安装至 Sysroot
   llvm        - 编译 LLVM 核心编译器工具 (clang/lld/llvm-ar 等)
-  runtimes    - 编译目标 C++ 运行时 (compiler-rt crt / libunwind / libc++) 并合并静态库
+  runtimes    - 编译目标全套运行时 (libc.a / builtins / crtbegin / libunwind / libc++) 并合并静态库
   torch-mlir  - 配置并构建 torch-mlir 组件 (可扩展插件阶段)
   prune       - 精简无用跨平台工具、剥离符号、生成三元组链接与 .cfg
   verify      - 工具链运行库检查与 C/C++ 冒烟测试
@@ -490,7 +490,7 @@ run_step() {
     llvm)
       step_llvm
       ;;
-    runtimes|libcxx|libc++)
+    runtimes|runtime|libcxx|libc++)
       step_runtimes
       ;;
     torch-mlir|torch_mlir)
@@ -532,9 +532,9 @@ if [ "$REBUILD_LLVM" = 1 ]; then
 fi
 
 # 标准流水线步骤序列
-PIPELINE=(bootstrap fetch llvm builtins musl runtimes prune verify)
+PIPELINE=(bootstrap fetch llvm runtimes prune verify)
 if [ "${ENABLE_TORCH_MLIR:-0}" = 1 ] || [ "${CLI_ENABLE_TORCH_MLIR:-0}" = 1 ]; then
-  PIPELINE=(bootstrap fetch llvm builtins musl runtimes torch-mlir prune verify)
+  PIPELINE=(bootstrap fetch llvm runtimes torch-mlir prune verify)
 fi
 
 if [ "$ONLY_FETCH" = 1 ]; then
