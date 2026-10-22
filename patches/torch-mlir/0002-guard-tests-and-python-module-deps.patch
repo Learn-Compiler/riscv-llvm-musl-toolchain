@@ -1,27 +1,5 @@
---- a/CMakeLists.txt
-+++ b/CMakeLists.txt
-@@ -216,8 +216,11 @@ add_subdirectory(include)
- add_subdirectory(lib)
- add_subdirectory(tools)
- 
-+option(TORCH_MLIR_INCLUDE_TESTS "Generate build targets for the torch-mlir unit tests." OFF)
-+if(TORCH_MLIR_INCLUDE_TESTS)
- add_custom_target(check-torch-mlir-all)
- add_dependencies(check-torch-mlir-all check-torch-mlir)
-+endif()
- 
- if(MLIR_ENABLE_BINDINGS_PYTHON)
-   # If parent projects want to configure where to place the python packages,
-@@ -227,7 +230,9 @@ if(MLIR_ENABLE_BINDINGS_PYTHON)
-   endif()
- endif()
- 
-+if(TORCH_MLIR_INCLUDE_TESTS)
- add_subdirectory(test)
-+endif()
- 
- if (NOT LLVM_INSTALL_TOOLCHAIN_ONLY)
-   install(DIRECTORY include/torch-mlir include/torch-mlir-c include/torch-mlir-dialects
+diff --git a/test/CMakeLists.txt b/test/CMakeLists.txt
+index dbfa86a..b3b79a8 100644
 --- a/test/CMakeLists.txt
 +++ b/test/CMakeLists.txt
 @@ -13,10 +13,12 @@ configure_lit_site_cfg(

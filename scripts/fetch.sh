@@ -65,6 +65,7 @@ checkout_repo_ref() {
   local fetch_ok=0
   for i in 1 2 3; do
     if git -C "$dest" fetch --depth 1 origin "$ref" 2>/dev/null || \
+       git -C "$dest" fetch --depth 1 origin "tags/$ref:tags/$ref" 2>/dev/null || \
        git -C "$dest" fetch origin "$ref" 2>/dev/null || \
        git -C "$dest" fetch --depth 1 "$repo" "$ref" 2>/dev/null; then
       fetch_ok=1
@@ -76,6 +77,7 @@ checkout_repo_ref() {
 
   git -C "$dest" checkout -q -f FETCH_HEAD
   [ -e "$dest/$sentinel" ] || die "$name 检出后缺少关键文件: $dest/$sentinel"
+  rm -f "$dest"/.applied_*
   echo "$ref" > "$dest/.git_checked_ref"
   ok "$name 成功锁定至 $(git -C "$dest" rev-parse --short HEAD 2>/dev/null || echo "$ref")"
 }
@@ -119,7 +121,7 @@ step_fetch() {
       rm -f "$SRC/third_party/torch-mlir"
       rm -rf "$SRC/build-torch-mlir"
     fi
-    checkout_repo_ref "$SRC/third_party/torch-mlir" "${TORCH_MLIR_REPO:-https://github.com/llvm/torch-mlir.git}" "${TORCH_MLIR_REF:-main}" "CMakeLists.txt" "torch-mlir"
+    checkout_repo_ref "$SRC/third_party/torch-mlir" "${TORCH_MLIR_REPO:-https://github.com/llvm/torch-mlir.git}" "${TORCH_MLIR_REF:-v20261001}" "CMakeLists.txt" "torch-mlir"
   fi
 
   # ---- 4. 准备 linux-headers 源码 (Git Submodule / 本地挂载) ----

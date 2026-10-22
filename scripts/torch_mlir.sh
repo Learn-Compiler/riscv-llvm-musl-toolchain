@@ -49,12 +49,15 @@ step_torch_mlir() {
     log "torch-mlir 源码未就绪，正在拉取锁定版本 (${TORCH_MLIR_REF:-main}) ..."
     # shellcheck disable=SC1091
     source "$SCRIPT_DIR/fetch.sh"
-    checkout_repo_ref "$SRC/third_party/torch-mlir" "${TORCH_MLIR_REPO:-https://github.com/llvm/torch-mlir.git}" "${TORCH_MLIR_REF:-main}" "CMakeLists.txt" "torch-mlir"
+    checkout_repo_ref "$SRC/third_party/torch-mlir" "${TORCH_MLIR_REPO:-https://github.com/llvm/torch-mlir.git}" "${TORCH_MLIR_REF:-v20261001}" "CMakeLists.txt" "torch-mlir"
     torch_src="$SRC/third_party/torch-mlir"
 
-    # 应用 torch-mlir 工程补丁
-    apply_patches "torch-mlir" "$torch_src"
   fi
+
+  # 应用 torch-mlir 工程补丁
+  # shellcheck disable=SC1091
+  source "$SCRIPT_DIR/fetch.sh"
+  apply_patches "torch-mlir" "$torch_src"
 
   if [ ! -d "$torch_src" ] || [ ! -f "$torch_src/CMakeLists.txt" ]; then
     die "torch-mlir 源码未就绪 ($torch_src)，请通过 --torch-mlir-src 指定源码目录"
@@ -88,9 +91,16 @@ step_torch_mlir() {
   # 版本相容性探测与自检
   align_and_check_torch_mlir_version "$torch_src"
 
+  # 确保 LLVM 导出的依赖文件在 install 目录中完整存在（防止此前执行过 prune 导致 find_package 报错）
+  if [ ! -f "$INSTALL/bin/llvm-dwp" ] && [ -d "$BUILD" ] && [ -f "$BUILD/build.ninja" ]; then
+    log "检测到部分 LLVM 导出工具缺失（此前执行过 prune），正在从构建目录快速恢复..."
+    "$BOOT/bin/ninja" -C "$BUILD" install
+  fi
+
   log "配置并构建 torch-mlir (源码: $torch_src)"
   local TORCH_BUILD="$SRC/build-torch-mlir"
   mkdir -p "$TORCH_BUILD"
+  rm -rf "$TORCH_BUILD/CMakeCache.txt" "$TORCH_BUILD/CMakeFiles"
 
   local extra_torch_flags=()
   if [ -n "${TORCH_MLIR_EXTRA_CMAKE_ARGS:-}" ]; then
@@ -125,6 +135,7 @@ step_torch_mlir() {
     -DLLVM_TABLEGEN_EXE="$INSTALL/bin/llvm-tblgen" \
     -DTORCH_MLIR_OUT_OF_TREE_BUILD=ON \
     -DTORCH_MLIR_ENABLE_STABLEHLO="$enable_stablehlo" \
+    -DTORCH_MLIR_ENABLE_TOSA="${TORCH_MLIR_ENABLE_TOSA:-OFF}" \
     -DMLIR_ENABLE_BINDINGS_PYTHON="${TORCH_MLIR_ENABLE_PYTHON:-OFF}" \
     -DTORCH_MLIR_ENABLE_PYTORCH_EXTENSIONS=OFF \
     -DTORCH_MLIR_INCLUDE_TESTS=OFF \

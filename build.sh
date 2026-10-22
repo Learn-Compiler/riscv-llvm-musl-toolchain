@@ -52,7 +52,7 @@ show_help() {
   ./build.sh --no-assertions     显式关闭 LLVM 断言
   ./build.sh --strip             强制剥离宿主程序符号 (Strip)
   ./build.sh --no-strip          保留宿主程序与库调试符号
-  ./build.sh --llvm-version <REF>       指定 LLVM 版本/分支/Tag/Commit (默认: release/23.x)
+  ./build.sh --llvm-version <REF>       指定 LLVM 版本/分支/Tag/Commit (默认: 2fc577681ca1 对齐 torch-mlir)
   ./build.sh --torch-mlir-version <REF> 指定 torch-mlir 版本/分支/Tag/Commit
   ./build.sh --musl-version <REF>       指定 Musl 版本/分支/Tag/Commit (默认: v1.2.5)
   ./build.sh --linux-headers-version <REF> 指定 linux-headers 版本/分支/Tag (默认: master)
@@ -378,6 +378,52 @@ if [ "$ENABLE_SHARED" = "ON" ] && [ -z "$CLI_DEFAULT_STATIC_LINK" ]; then
   DEFAULT_STATIC_LINK="OFF"
 fi
 
+# 动态版本状态检测：若当前版本配置与上次构建状态不一致，自动清除相关时间戳
+CURRENT_VER_STATE="LLVM=${LLVM_REF:-}|TORCH=${TORCH_MLIR_REF:-}|MUSL=${MUSL_REF:-}|HDRS=${LINUX_HEADERS_REF:-}"
+if [ -f "$STAMPS/.versions_state" ]; then
+  PREV_VER_STATE="$(cat "$STAMPS/.versions_state" 2>/dev/null || true)"
+  if [ "$CURRENT_VER_STATE" != "$PREV_VER_STATE" ]; then
+    warn "检测到版本配置变动，自动重置受影响构建步骤 ($PREV_VER_STATE -> $CURRENT_VER_STATE)"
+    unmark fetch
+    unmark builtins
+    unmark llvm
+    unmark torch_mlir
+    unmark prune
+    unmark verify
+  fi
+else
+  # 首次初始化版本状态跟踪：不盲目清除已就绪的基础组件时间戳
+  if ! [ -f "$SRC/third_party/llvm/llvm/CMakeLists.txt" ]; then
+    unmark fetch
+  fi
+fi
+
+# 检查实际检出的 Git 版本与当前配置是否一致（防止未拉取新版本导致与旧 LLVM 头文件不匹配）
+if [ -f "$SRC/third_party/llvm/.git_checked_ref" ]; then
+  CHECKED_LLVM_REF="$(cat "$SRC/third_party/llvm/.git_checked_ref" 2>/dev/null || true)"
+  if [ -n "$CHECKED_LLVM_REF" ] && [ -n "${LLVM_REF:-}" ] && [ "$CHECKED_LLVM_REF" != "$LLVM_REF" ]; then
+    warn "检测到 third_party/llvm 实际版本 ($CHECKED_LLVM_REF) 与配置 ($LLVM_REF) 不一致，重置构建步骤"
+    unmark fetch
+    unmark builtins
+    unmark llvm
+    unmark torch_mlir
+    unmark prune
+    unmark verify
+    rm -rf "$SRC/build-torch-mlir"
+  fi
+fi
+if [ -f "$SRC/third_party/torch-mlir/.git_checked_ref" ]; then
+  CHECKED_TORCH_REF="$(cat "$SRC/third_party/torch-mlir/.git_checked_ref" 2>/dev/null || true)"
+  if [ -n "$CHECKED_TORCH_REF" ] && [ -n "${TORCH_MLIR_REF:-}" ] && [ "$CHECKED_TORCH_REF" != "$TORCH_MLIR_REF" ]; then
+    warn "检测到 torch-mlir 实际版本 ($CHECKED_TORCH_REF) 与配置 ($TORCH_MLIR_REF) 不一致，重置源码与构建步骤"
+    unmark fetch
+    unmark torch_mlir
+    rm -rf "$SRC/build-torch-mlir"
+  fi
+fi
+mkdir -p "$STAMPS"
+echo "$CURRENT_VER_STATE" > "$STAMPS/.versions_state"
+
 # 若显式通过参数指定了自研源码或特定版本变更，自动清理 fetch 时间戳以触发更新
 if [ -n "$CLI_LLVM_SRC" ] || [ -n "$CLI_MUSL_SRC" ] || [ -n "$CLI_TORCH_MLIR_SRC" ] || [ -n "$CLI_LINUX_HEADERS_SRC" ] || \
    [ -n "$CLI_LLVM_REF" ] || [ -n "$CLI_TORCH_MLIR_REF" ] || [ -n "$CLI_MUSL_REF" ] || [ -n "$CLI_LINUX_HEADERS_REF" ]; then
@@ -386,6 +432,10 @@ fi
 if [ -n "$CLI_LLVM_REF" ]; then
   unmark builtins
   unmark llvm
+  unmark torch_mlir
+fi
+if [ -n "$CLI_TORCH_MLIR_REF" ]; then
+  unmark torch_mlir
 fi
 
 # ─── 前置检查 ────────────────────────────────────────────────────────────

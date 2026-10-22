@@ -18,6 +18,12 @@ step_llvm() {
   mkdir -p "$BUILD"
   ln -sfn "$SYSROOT" "$BUILD/sysroot"     # 构建期 clang 从 ../sysroot 找 sysroot
 
+  # 清理可能由旧版本 LLVM (如 LLVM 21) 遗留在 libcxx 中的陈旧 C 兼容头文件 (如 ctype.h, float.h 等)
+  # LLVM 23 libc++ 移除了这些包装头文件并添加了防混用保护宏，旧头文件残留会导致编译 libcxx 时触发静态断言错误
+  rm -rf "$BUILD/include/c++/v1" "$INSTALL/include/c++/v1"
+  rm -f "$BUILD/runtimes/runtimes-riscv64-unknown-linux-musl-bins/libcxx/src/CMakeFiles/cxx_static.dir/charconv.cpp.o"
+  rm -f "$BUILD/runtimes/runtimes-riscv64-unknown-linux-musl-stamps/runtimes-riscv64-unknown-linux-musl-build"
+
   # 保证宿主 CXX 参数有效（若未加载则自动探测）
   if [ -z "${HOST_CXX_FLAGS:-}" ] || [ -z "${HOST_LINK_FLAGS:-}" ]; then
     # shellcheck disable=SC1091
@@ -124,12 +130,38 @@ step_llvm() {
   log "安装 LLVM"
   "$BOOT/bin/ninja" -C "$BUILD" install
 
-  # C++ 运行库补进 sysroot
-  cp -a "$BUILD"/lib/"$T"/libc++*   "$SYSROOT/lib/" 2>/dev/null || true
-  cp -a "$BUILD"/lib/"$T"/libunwind* "$SYSROOT/lib/" 2>/dev/null || true
+  # 将 libc++abi.a 合并进静态 libc++.a，解决纯静态链接时 clang++ 默认只传 -lc++ 导致的 ABI 符号未定义问题
+  local inst_rtdir="$INSTALL/lib/$T"
+  if [ -f "$inst_rtdir/libc++.a" ] && [ -f "$inst_rtdir/libc++abi.a" ]; then
+    log "合并 libc++abi.a 到静态 libc++.a"
+    local mri_script="$BUILD/merge_libcxx.mri"
+    cat > "$mri_script" <<EOF
+CREATE $inst_rtdir/libc++_merged.a
+ADDLIB $inst_rtdir/libc++.a
+ADDLIB $inst_rtdir/libc++abi.a
+SAVE
+END
+EOF
+    "$INSTALL/bin/llvm-ar" -M < "$mri_script"
+    mv -f "$inst_rtdir/libc++_merged.a" "$inst_rtdir/libc++.a"
+    rm -f "$mri_script"
+    [ -d "$BUILD/lib/$T" ] && cp -f "$inst_rtdir/libc++.a" "$BUILD/lib/$T/libc++.a" 2>/dev/null || true
+  fi
+
+  # C++ 运行库补进 sysroot（优先使用 install 目录下已合并 ABI 的静态库）
+  mkdir -p "$SYSROOT/usr/lib" "$SYSROOT/lib"
+  local rtdir="$INSTALL/lib/$T"
+  [ -d "$rtdir" ] || rtdir="$BUILD/lib/$T"
+  if [ -d "$rtdir" ]; then
+    cp -a "$rtdir"/libc++*   "$SYSROOT/usr/lib/" 2>/dev/null || true
+    cp -a "$rtdir"/libunwind* "$SYSROOT/usr/lib/" 2>/dev/null || true
+    cp -a "$rtdir"/libc++*   "$SYSROOT/lib/" 2>/dev/null || true
+    cp -a "$rtdir"/libunwind* "$SYSROOT/lib/" 2>/dev/null || true
+  fi
 
   # 若为纯静态模式，清理可能残留的目标端共享库
   if [ "${ENABLE_SHARED:-OFF}" = "OFF" ]; then
+    rm -f "$SYSROOT"/usr/lib/libc++.so* "$SYSROOT"/usr/lib/libc++abi.so* "$SYSROOT"/usr/lib/libunwind.so* "$SYSROOT"/usr/lib/libc.so* "$SYSROOT"/usr/lib/"$LD_MUSL_SO" 2>/dev/null || true
     rm -f "$SYSROOT"/lib/libc++.so* "$SYSROOT"/lib/libc++abi.so* "$SYSROOT"/lib/libunwind.so* "$SYSROOT"/lib/libc.so* "$SYSROOT"/lib/"$LD_MUSL_SO" 2>/dev/null || true
   fi
   mark llvm

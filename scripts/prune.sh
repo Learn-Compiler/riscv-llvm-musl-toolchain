@@ -14,20 +14,8 @@ step_prune() {
 
   [ -d "$INSTALL/bin" ] || die "未找到安装目录 $INSTALL/bin，请先完成构建"
 
-  # 1. 移除无关平台的工具与中间件（Windows, macOS, WebAssembly, GPU offload, 静态分析 Python 网页工具）
+  # 1. 移除无关平台的独立脚本（静态分析 Web 脚本）
   local useless_bins=(
-    # macOS
-    clang-installapi ld64.lld
-    # Windows
-    clang-cl lld-link llvm-ml llvm-ml64 llvm-mt llvm-pdbutil llvm-rc
-    # WebAssembly
-    wasm-ld
-    # GPU / Offload
-    amdgpu-arch nvptx-arch clang-nvlink-wrapper clang-offload-bundler clang-sycl-linker offload-arch
-    # 冗余/重量级分析与调试工具
-    clang-repl clang-extdef-mapping clang-check clang-refactor clang-scan-deps diagtool
-    llvm-dwp llvm-mca llvm-profgen
-    # 静态分析 Web 脚本
     scan-build scan-build-py scan-view analyze-build intercept-build hmaptool git-clang-format
   )
 

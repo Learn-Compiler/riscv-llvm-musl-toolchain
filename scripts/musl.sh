@@ -63,7 +63,8 @@ step_musl() {
   local hdr_dir
   hdr_dir="$(get_linux_headers_include_dir)"
   [ -d "$hdr_dir" ] || die "缺少 Linux 内核头文件目录: $hdr_dir"
-  cp -a "$hdr_dir/." "$SYSROOT/usr/include/"
+  # 使用 -rL 解除软链接引用，避免因目标 sysroot 已存在实际目录而报 cannot overwrite directory 错误，并确保跨平台 sysroot 内无悬空链接
+  cp -rL "$hdr_dir/." "$SYSROOT/usr/include/"
 
   local check_files=(usr/lib/libc.a usr/lib/crt1.o usr/include/stdio.h)
   if [ "${ENABLE_SHARED:-OFF}" = "ON" ]; then

@@ -19,7 +19,8 @@ step_builtins() {
   local hdr_dir
   hdr_dir="$(get_linux_headers_include_dir)"
   [ -d "$hdr_dir" ] || die "缺少 Linux 内核头文件目录: $hdr_dir (请先执行 ./build.sh --step fetch)"
-  cp -a "$hdr_dir/." "$SYSROOT/usr/include/"
+  # 使用 -rL 解除软链接引用，避免因目标 sysroot 已存在实际目录而报 cannot overwrite directory 错误，并确保跨平台 sysroot 内无悬空链接
+  cp -rL "$hdr_dir/." "$SYSROOT/usr/include/"
 
   # 1. 安装 musl 基础头文件到 sysroot（只需头文件，几秒钟即可完成）
   echo "  安装 musl 头文件到 $SYSROOT/usr/include ..."
