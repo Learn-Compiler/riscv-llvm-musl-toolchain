@@ -17,6 +17,74 @@
 
 ---
 
+## 🏗️ 工具链构建架构与自举流水线 (2-Stage Bootstrapping)
+
+本工具链采用正统的**“宿主本地工具优先接入”**与**“两阶段自举（2-Stage Bootstrapping）”**设计：
+1. **本地环境优先**：构建时首先检测宿主机是否已有符合要求的 CMake（>= 3.20）、Ninja、Make 和 Clang/GCC，满足要求时直接复用，**完全跳过下载 1.1GB 外部预编译包与 deb**，秒级完成引导；
+2. **两阶段解耦构建**：
+   - **阶段一（Stage 1）**：使用宿主编译器先构建 LLVM 核心交叉编译器本体（运行于 x86_64，支持 RISC-V 目标架构），解耦目标运行库；
+   - **阶段二（Stage 2）**：将目标平台的 **`clang_rt.crtbegin.o`**、**`libclang_rt.builtins.a`**、**`libc.a`**、**`libc++.a`**（含 `libc++abi.a` 融合）以及 **`libunwind.a`** 全部统一定义为目标运行时（Runtimes），在 LLVM 核心编译器生成后，由新鲜出炉的最新 LLVM 亲自交叉编译生成，保证目标运行库血统高度纯正。
+
+### 架构流程图 (Mermaid & ASCII)
+
+```mermaid
+flowchart TD
+    subgraph Host["宿主机本地环境 (Host Environment)"]
+        H_Tools["检测本地工具: CMake >= 3.20, Ninja, Make, Clang/GCC<br/>(满足时直接软链复用，跳过 1.1GB 预编译包外网下载)"]
+    end
+
+    subgraph Stage1["阶段一：宿主交叉编译器构建 (Stage 1 LLVM)"]
+        LLVM_Build["编译 LLVM 23 核心交叉编译器本体 (解耦目标运行库)<br/>- clang, clang++<br/>- lld (ld.lld)<br/>- llvm-ar, llvm-nm, llvm-ranlib, llvm-objcopy<br/>- llvm-tblgen, mlir-opt"]
+    end
+
+    subgraph Stage2["阶段二：目标运行时全集构建 (Stage 2 Runtimes)"]
+        direction TB
+        R_Sysroot["1. 准备 Sysroot 基础环境 & Linux 内核 UAPI 头文件"]
+        R_Musl["2. 编译目标 C 运行库 Musl (libc.a)"]
+        R_Runtimes["3. 独立编译 LLVM 目标运行库 (Standalone Runtimes):<br/>- clang_rt.crtbegin.o / crtend.o<br/>- libclang_rt.builtins.a<br/>- libunwind.a<br/>- libc++.a & libc++abi.a"]
+        R_Merge["4. 自动融合: llvm-ar 将 libc++abi.a 合并入静态 libc++.a<br/>(彻底解决纯静态链接缺少 ABI 虚表与异常符号问题)"]
+        R_Sysroot --> R_Musl --> R_Runtimes --> R_Merge
+    end
+
+    subgraph Stage3["阶段三：扩展组件与验证 (Extensions & Verification)"]
+        TorchMLIR["5. (可选) 编译 torch-mlir 前端方言插件 (torch-mlir-opt)"]
+        Prune["6. 精简裁剪 & 生成便携配置 riscv64-unknown-linux-musl.cfg"]
+        Verify["7. 自动化冒烟测试 (C/C++ 纯静态、.cfg 默认链接、MLIR/torch-mlir 方言)"]
+        TorchMLIR --> Prune --> Verify
+    end
+
+    H_Tools --> LLVM_Build
+    LLVM_Build -->|产出新 Clang 交叉编译器| Stage2
+    Stage2 --> Stage3
+```
+
+```text
+[宿主本地环境 (优先复用系统 CMake/Ninja/Clang/GCC，跳过 1.1GB 外部下载)]
+                           │
+                           ▼
+  1. 【bootstrap】  本地工具链 0 秒探测接入（无外网依赖）
+  2. 【fetch】      源码检出与锁定 (LLVM 23.1.4 / Musl 1.2.5 / torch-mlir v20261001)
+                           │
+                           ▼
+  3. 【llvm】       阶段一：用本地编译器构建 LLVM 23 核心交叉编译器本体
+                    产物：clang, clang++, lld, llvm-ar, llvm-nm, mlir-opt (运行于 x86_64)
+                           │
+                           ▼ （由刚生成的 LLVM 23 交叉编译目标架构全部运行库）
+  4. 【runtimes】   阶段二：全套目标运行时统一构建
+                    ├── ① 准备 Linux 内核 UAPI 头文件到 Sysroot
+                    ├── ② 编译目标 C 运行库 Musl: libc.a
+                    ├── ③ 编译目标启动辅助对象: clang_rt.crtbegin.o / crtend.o
+                    ├── ④ 编译目标基础函数库: libclang_rt.builtins.a
+                    ├── ⑤ 编译目标堆栈展开库: libunwind.a
+                    └── ⑥ 编译目标 C++ 标准库: libc++.a (自动融合 libc++abi.a)
+                           │
+                           ▼
+  5. 【torch-mlir】 阶段三：编译 PyTorch 到 MLIR 前端方言插件 (torch-mlir-opt)
+  6. 【prune】      精简无用工具，生成 riscv64-unknown-linux-musl.cfg 默认静态配置
+  7. 【verify】     全套自动化冒烟测试 (C/C++ 纯静态、.cfg 默认链接、MLIR/torch-mlir)
+```
+
+
 ## 🚀 快速开始
 
 ### 1. 基础构建（官方发布版本）
@@ -207,15 +275,16 @@ riscv-llvm-musl-toolchain/
 │
 ├── scripts/                      # 【执行层】模块化独立步骤流水线
 │   ├── common.sh                 # 公共基础设施（日志、时间戳打标、断点续传下载、工具探测）
-│   ├── bootstrap.sh              # 阶段 1：免 root 准备引导工具 & 探测宿主 C++
+│   ├── bootstrap.sh              # 阶段 1：智能探测本地编译工具链（本地优先免外网下载）
 │   ├── fetch.sh                  # 阶段 2：准备源码 (Submodule 更新或挂载本地源码) 并自动应用补丁
-│   ├── builtins.sh               # 阶段 3：安装 Musl 基础头文件并独立构建 compiler-rt builtins 与 crt
-│   ├── musl.sh                   # 阶段 4：配置并构建 Musl libc 并安装至 Sysroot
-│   ├── llvm.sh                   # 阶段 5：全量编译 LLVM/Clang 及全部运行时 (libc++/libunwind)
-│   ├── torch_mlir.sh             # 扩展阶段：配置并构建 torch-mlir 插件组件
-│   ├── prune.sh                  # 阶段 6：精简裁剪、Strip、三元组软链接与生成 .cfg 配置文件
-│   ├── verify.sh                 # 阶段 7：构建产物验证与 C/C++ 冒烟测试
-│   └── package.sh                # 阶段 8：打包发布 (tar.zst) 与计算 SHA256 校验和
+│   ├── llvm.sh                   # 阶段 3：用宿主编译器全量构建 LLVM 核心交叉编译器本体 (clang/lld)
+│   ├── runtimes.sh               # 阶段 4：用新 Clang 编译全套目标运行时 (libc.a/builtins/crt/libunwind/libc++)
+│   ├── builtins.sh               # （辅助）独立编译 compiler-rt builtins
+│   ├── musl.sh                   # （辅助）独立编译 Musl libc
+│   ├── torch_mlir.sh             # 扩展阶段：配置并构建 torch-mlir 插件组件 (torch-mlir-opt)
+│   ├── prune.sh                  # 阶段 5：精简裁剪、Strip、三元组软链接与生成 .cfg 配置文件
+│   ├── verify.sh                 # 阶段 6：构建产物自愈检查与 C/C++ 纯静态冒烟测试
+│   └── package.sh                # 阶段 7：打包发布 (tar.zst) 与计算 SHA256 校验和
 │
 ├── patches/                      # 【拓展层】组件补丁目录（自动检测应用）
 │   ├── llvm/                     # LLVM 自定义补丁 (*.patch)
