@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# scripts/musl.sh - 使用宿主引导 Clang 编译并安装 Musl libc 到 Sysroot
+# scripts/musl.sh - 使用编译好的 Clang 编译并安装 Musl libc 到 Sysroot
 # ==============================================================================
 set -euo pipefail
 
@@ -16,16 +16,44 @@ step_musl() {
   fi
   log "编译 musl → $SYSROOT"
   mkdir -p "$SYSROOT" "$SHIM"
-  for t in ar ranlib strip nm objcopy; do
-    ln -sf "$BOOT/bin/llvm-$t" "$SHIM/${MUSL_TARGET}-$t"
-  done
+
+  local target_clang="$INSTALL/bin/clang"
+  local target_ar="$INSTALL/bin/llvm-ar"
+  local target_ranlib="$INSTALL/bin/llvm-ranlib"
+  local target_strip="$INSTALL/bin/llvm-strip"
+  local target_nm="$INSTALL/bin/llvm-nm"
+  local target_objcopy="$INSTALL/bin/llvm-objcopy"
+
+  if [ ! -x "$target_clang" ]; then
+    target_clang="$BOOT/bin/clang"
+    target_ar="$BOOT/bin/llvm-ar"
+    target_ranlib="$BOOT/bin/llvm-ranlib"
+    target_strip="$BOOT/bin/llvm-strip"
+    target_nm="$BOOT/bin/llvm-nm"
+    target_objcopy="$BOOT/bin/llvm-objcopy"
+  fi
+  [ -x "$target_clang" ] || die "未找到编译器，请先执行 ./build.sh --step llvm"
+
+  ln -sf "$target_ar" "$SHIM/${MUSL_TARGET}-ar"
+  ln -sf "$target_ranlib" "$SHIM/${MUSL_TARGET}-ranlib"
+  ln -sf "$target_strip" "$SHIM/${MUSL_TARGET}-strip"
+  ln -sf "$target_nm" "$SHIM/${MUSL_TARGET}-nm"
+  ln -sf "$target_objcopy" "$SHIM/${MUSL_TARGET}-objcopy"
   export PATH="$SHIM:$BOOT/bin:$PATH"
 
   cd "$MUSL_DIR"
   make distclean >/dev/null 2>&1 || true
 
-  local BUILTIN_LIB="$BOOT/$LLVM_PREBUILT/lib/clang/18/lib/linux/$RT_BUILTIN_NAME"
-  [ -f "$BUILTIN_LIB" ] || die "缺少 compiler-rt builtins 库: $BUILTIN_LIB"
+  local clang_ver
+  clang_ver=$("$target_clang" -dumpversion 2>/dev/null | cut -d. -f1 || echo "23")
+  local BUILTIN_LIB=""
+  for b in "$INSTALL/lib/clang/$clang_ver/lib/$T/libclang_rt.builtins.a" \
+           "$INSTALL/lib/clang/$clang_ver/lib/$T/$RT_BUILTIN_NAME" \
+           "$SYSROOT/usr/lib/libclang_rt.builtins.a" \
+           "$BOOT/$LLVM_PREBUILT/lib/clang/18/lib/linux/$RT_BUILTIN_NAME"; do
+    if [ -f "$b" ]; then BUILTIN_LIB="$b"; break; fi
+  done
+  [ -n "$BUILTIN_LIB" ] || die "缺少 compiler-rt builtins 库，请先执行 ./build.sh --step builtins"
 
   local musl_shared_flags=()
   if [ "${ENABLE_SHARED:-OFF}" = "ON" ]; then
@@ -39,7 +67,7 @@ step_musl() {
     read -r -a musl_extra_flags <<< "${MUSL_EXTRA_ARGS}"
   fi
 
-  CC="$BOOT/bin/clang --target=$T -fuse-ld=lld" \
+  CC="$target_clang --target=$T -fuse-ld=lld" \
   LIBCC="$BUILTIN_LIB" \
   ./configure \
       --target="$MUSL_TARGET" \
@@ -55,15 +83,13 @@ step_musl() {
   make DESTDIR="$SYSROOT" install
 
   if [ "${ENABLE_SHARED:-OFF}" = "ON" ]; then
-    # 修复 musl 默认创建的绝对路径软链接（/usr/lib/libc.so 在宿主机上为悬空链接）为相对链接
     ln -sf ../usr/lib/libc.so "$SYSROOT/lib/$LD_MUSL_SO"
   fi
 
-  # 补内核头文件（musl 的 --with-headers 是无效选项，会被静默忽略）
+  # 补内核头文件
   local hdr_dir
   hdr_dir="$(get_linux_headers_include_dir)"
   [ -d "$hdr_dir" ] || die "缺少 Linux 内核头文件目录: $hdr_dir"
-  # 使用 -rL 解除软链接引用，避免因目标 sysroot 已存在实际目录而报 cannot overwrite directory 错误，并确保跨平台 sysroot 内无悬空链接
   cp -rL "$hdr_dir/." "$SYSROOT/usr/include/"
 
   local check_files=(usr/lib/libc.a usr/lib/crt1.o usr/include/stdio.h)

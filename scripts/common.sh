@@ -13,6 +13,7 @@ fi
 INSTALL="${INSTALL:-$SRC/install-clang-musl}"
 SYSROOT="${SYSROOT:-$INSTALL/sysroot}"
 BUILD="${BUILD:-$SRC/build-llvm-musl}"
+BUILD_RUNTIMES="${BUILD_RUNTIMES:-$SRC/build-runtimes}"
 BOOT="${BOOT:-$SRC/.bootstrap}"
 STAMPS="${STAMPS:-$SRC/.build-stamps}"
 SHIM="${SHIM:-$SRC/.musl-shim}"

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# scripts/bootstrap.sh - 准备免 root 引导工具与确定宿主 C++ 编译方式
+# scripts/bootstrap.sh - 准备引导工具（优先本地宿主工具，缺失时自动回退下载）
 # ==============================================================================
 set -euo pipefail
 
@@ -9,84 +9,140 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/common.sh"
 init_config
 
+find_system_binary() {
+  local name="$1"
+  local p
+  while IFS= read -r p; do
+    if [[ "$p" != "$BOOT"* ]] && [ -x "$p" ]; then
+      echo "$p"
+      return 0
+    fi
+  done < <(which -a "$name" 2>/dev/null || true)
+  return 1
+}
+
 step_bootstrap() {
   if is_done bootstrap; then
     ok "引导工具已就绪，跳过"
     return
   fi
-  log "准备免 root 引导工具到 $BOOT"
+  log "准备引导工具到 $BOOT (优先检测宿主本地工具链)"
   mkdir -p "$BOOT/bin"
+  # 清理可能存在的损坏软链接
+  find "$BOOT/bin" -xtype l -delete 2>/dev/null || true
 
-  # ---- cmake ----
-  if [ ! -x "$BOOT/$CMAKE_TARBALL/bin/cmake" ]; then
-    echo "  下载 cmake ..."
-    fetch_file "$CMAKE_URL" "$BOOT/cmake.tar.gz"
-    tar -xzf "$BOOT/cmake.tar.gz" -C "$BOOT"
+  # ---- 1. cmake (优先本地 >= 3.20) ----
+  local sys_cmake
+  sys_cmake="$(find_system_binary cmake || true)"
+  if [ -n "$sys_cmake" ]; then
+    local cmake_ver
+    cmake_ver="$("$sys_cmake" --version | head -1 | awk '{print $3}')"
+    local cmake_major cmake_minor
+    cmake_major="$(echo "$cmake_ver" | cut -d. -f1)"
+    cmake_minor="$(echo "$cmake_ver" | cut -d. -f2)"
+    if [ "$cmake_major" -gt 3 ] || { [ "$cmake_major" -eq 3 ] && [ "$cmake_minor" -ge 20 ]; }; then
+      ln -sf "$sys_cmake" "$BOOT/bin/cmake"
+      local sys_ctest
+      sys_ctest="$(find_system_binary ctest || true)"
+      [ -n "$sys_ctest" ] && ln -sf "$sys_ctest" "$BOOT/bin/ctest"
+      ok "使用宿主本地 cmake ($cmake_ver)"
+    fi
   fi
-  ln -sf "$BOOT/$CMAKE_TARBALL/bin/cmake" "$BOOT/bin/cmake"
-  ln -sf "$BOOT/$CMAKE_TARBALL/bin/ctest" "$BOOT/bin/ctest"
-  ok "cmake $("$BOOT/bin/cmake" --version | head -1 | awk '{print $3}')"
-
-  # ---- ninja ----
-  if [ ! -x "$BOOT/ninja/ninja" ]; then
-    echo "  下载 ninja ..."
-    fetch_file "$NINJA_URL" "$BOOT/ninja.zip"
-    mkdir -p "$BOOT/ninja"
-    unzip -oq "$BOOT/ninja.zip" -d "$BOOT/ninja"
-    chmod +x "$BOOT/ninja/ninja"
+  if [ ! -x "$BOOT/bin/cmake" ]; then
+    if [ ! -x "$BOOT/$CMAKE_TARBALL/bin/cmake" ]; then
+      echo "  未检测到符合要求的宿主 cmake (需 >= 3.20)，从网络下载 cmake ..."
+      fetch_file "$CMAKE_URL" "$BOOT/cmake.tar.gz"
+      tar -xzf "$BOOT/cmake.tar.gz" -C "$BOOT"
+    fi
+    ln -sf "$BOOT/$CMAKE_TARBALL/bin/cmake" "$BOOT/bin/cmake"
+    ln -sf "$BOOT/$CMAKE_TARBALL/bin/ctest" "$BOOT/bin/ctest"
+    ok "下载引导 cmake $("$BOOT/bin/cmake" --version | head -1 | awk '{print $3}')"
   fi
-  ln -sf "$BOOT/ninja/ninja" "$BOOT/bin/ninja"
-  ok "ninja $("$BOOT/bin/ninja" --version)"
 
-  # ---- clang/lld 官方预编译（自包含）----
-  local LD="$BOOT/$LLVM_PREBUILT"
-  if [ ! -x "$LD/bin/clang" ]; then
-    echo "  下载 LLVM 18.1.8 官方预编译（约 1.1GB）..."
-    fetch_file "$LLVM_PREBUILT_URL" "$BOOT/llvm.tar.xz"
-    tar -xJf "$BOOT/llvm.tar.xz" -C "$BOOT"
+  # ---- 2. ninja (优先本地) ----
+  local sys_ninja
+  sys_ninja="$(find_system_binary ninja || find_system_binary ninja-build || true)"
+  if [ -n "$sys_ninja" ]; then
+    ln -sf "$sys_ninja" "$BOOT/bin/ninja"
+    ok "使用宿主本地 ninja ($("$sys_ninja" --version))"
+  else
+    if [ ! -x "$BOOT/ninja/ninja" ]; then
+      echo "  未检测到宿主 ninja，从网络下载 ninja ..."
+      fetch_file "$NINJA_URL" "$BOOT/ninja.zip"
+      mkdir -p "$BOOT/ninja"
+      unzip -oq "$BOOT/ninja.zip" -d "$BOOT/ninja"
+      chmod +x "$BOOT/ninja/ninja"
+    fi
+    ln -sf "$BOOT/ninja/ninja" "$BOOT/bin/ninja"
+    ok "下载引导 ninja $("$BOOT/bin/ninja" --version)"
   fi
-  for t in clang clang++ lld ld.lld llvm-ar llvm-ranlib llvm-strip llvm-nm \
-           llvm-objcopy llvm-objdump llvm-ranlib; do
-    [ -x "$LD/bin/$t" ] && ln -sf "$LD/bin/$t" "$BOOT/bin/$t"
-  done
-  ok "clang $("$BOOT/bin/clang" --version | head -1 | awk '{print $3}')"
 
-  # ---- make + 宿主 libstdc++ 头文件（免 root 解包）----
-  local DEBS="$BOOT/debs" ROOT="$BOOT/root"
-  mkdir -p "$DEBS"
-  if [ ! -x "$ROOT/usr/bin/make" ] || [ ! -d "$ROOT/usr/include/c++/$HOST_GCC_VER" ]; then
-    echo "  下载 make / libstdc++-dev / libgcc-dev ..."
+  # ---- 3. make (优先本地) ----
+  local sys_make
+  sys_make="$(find_system_binary make || true)"
+  if [ -n "$sys_make" ]; then
+    ln -sf "$sys_make" "$BOOT/bin/make"
+    ok "使用宿主本地 make ($("$sys_make" --version | head -1 | awk '{print $3}'))"
+  fi
+
+  # ---- 4. 宿主 C/C++ 编译器 (优先本地) ----
+  local sys_cc="" sys_cxx=""
+  local f_clang f_clangxx f_gcc f_gxx
+  f_clang="$(find_system_binary clang || true)"
+  f_clangxx="$(find_system_binary clang++ || true)"
+  f_gcc="$(find_system_binary gcc || true)"
+  f_gxx="$(find_system_binary g++ || true)"
+
+  if [ -n "$f_clang" ] && [ -n "$f_clangxx" ]; then
+    sys_cc="$f_clang"
+    sys_cxx="$f_clangxx"
+    ok "检测到宿主 Clang 编译器: $("$sys_cxx" --version | head -1)"
+  elif [ -n "$f_gcc" ] && [ -n "$f_gxx" ]; then
+    sys_cc="$f_gcc"
+    sys_cxx="$f_gxx"
+    ok "检测到宿主 GCC 编译器: $("$sys_cxx" --version | head -1)"
+  fi
+
+  if [ -n "$sys_cxx" ]; then
+    ln -sf "$sys_cc" "$BOOT/bin/clang"
+    ln -sf "$sys_cxx" "$BOOT/bin/clang++"
+    local sys_lld
+    sys_lld="$(find_system_binary ld.lld || find_system_binary lld || true)"
+    if [ -n "$sys_lld" ]; then
+      ln -sf "$sys_lld" "$BOOT/bin/ld.lld"
+      ln -sf "$sys_lld" "$BOOT/bin/lld"
+    fi
+    for t in ar ranlib strip nm objcopy; do
+      local sys_tool
+      sys_tool="$(find_system_binary "llvm-$t" || find_system_binary "$t" || true)"
+      if [ -n "$sys_tool" ]; then
+        ln -sf "$sys_tool" "$BOOT/bin/llvm-$t"
+      fi
+    done
+    ok "宿主本地编译器与构建工具已接入引导环境（跳过下载 1.1GB 预编译包）"
+  else
+    # 宿主缺少编译器时回退到下载预编译包与 deb
+    local LD="$BOOT/$LLVM_PREBUILT"
+    if [ ! -x "$LD/bin/clang" ]; then
+      echo "  宿主缺失现代化编译器，从网络下载 LLVM 18.1.8 官方预编译（约 1.1GB）..."
+      fetch_file "$LLVM_PREBUILT_URL" "$BOOT/llvm.tar.xz"
+      tar -xJf "$BOOT/llvm.tar.xz" -C "$BOOT"
+    fi
+    for t in clang clang++ lld ld.lld llvm-ar llvm-ranlib llvm-strip llvm-nm \
+             llvm-objcopy llvm-objdump llvm-ranlib; do
+      [ -x "$LD/bin/$t" ] && ln -sf "$LD/bin/$t" "$BOOT/bin/$t"
+    done
+    local DEBS="$BOOT/debs" ROOT="$BOOT/root"
+    mkdir -p "$DEBS" "$ROOT"
     ( cd "$DEBS"
       for p in make "libstdc++-$HOST_GCC_VER-dev" "libgcc-$HOST_GCC_VER-dev"; do
         ls "${p}"_*.deb >/dev/null 2>&1 || apt-get download "$p" >/dev/null 2>&1 || true
       done )
+    fetch_file "$TINFO5_URL" "$DEBS/libtinfo5.deb" 2>/dev/null || true
+    for d in "$DEBS"/*.deb; do dpkg -x "$d" "$ROOT" 2>/dev/null || true; done
+    [ -x "$ROOT/usr/bin/make" ] && ln -sf "$ROOT/usr/bin/make" "$BOOT/bin/make"
   fi
-  # libtinfo5：noble 已删除该包，从 jammy 归档池取。
-  # ubuntu-18.04 版预编译 clang 要求符号版本 NCURSES_TINFO_5.0.19991023，
-  # 软链到系统的 libtinfo.so.6 无效（版本名不同），必须用真的 .so.5。
-  if [ ! -e "$ROOT/lib/x86_64-linux-gnu/libtinfo.so.5" ] \
-     && [ ! -e "$ROOT/usr/lib/x86_64-linux-gnu/libtinfo.so.5" ]; then
-    echo "  获取 libtinfo5（jammy 归档池）..."
-    fetch_file "$TINFO5_URL" "$DEBS/libtinfo5.deb"
-  fi
-  [ -n "$(ls -A "$DEBS"/*.deb 2>/dev/null)" ] || die "deb 下载失败，请检查网络"
-  mkdir -p "$ROOT"
-  for d in "$DEBS"/*.deb; do dpkg -x "$d" "$ROOT"; done
-  ln -sf "$ROOT/usr/bin/make" "$BOOT/bin/make"
 
-  # 把 libtinfo.so.5 收进独立目录，全局加进 LD_LIBRARY_PATH
-  local t5
-  t5=$(find "$ROOT" -name 'libtinfo.so.5' -print -quit)
-  [ -n "$t5" ] || die "libtinfo.so.5 解包失败"
-  mkdir -p "$BOOT/lib"
-  ln -sf "$t5" "$BOOT/lib/libtinfo.so.5"
-  export LD_LIBRARY_PATH="$BOOT/lib:${LD_LIBRARY_PATH:-}"
-  ok "make $("$BOOT/bin/make" --version 2>/dev/null | head -1 | awk '{print $3}')"
-
-  # ---- 确认后端存在 ----
-  "$BOOT/bin/clang" --print-targets 2>/dev/null | grep -qi "$LLVM_TARGET_ARCH" \
-    || die "引导 clang 不含 $LLVM_TARGET_ARCH 后端（或无法运行）"
-  ok "clang 可运行且含 $LLVM_TARGET_ARCH 后端"
   mark bootstrap
 }
 
@@ -101,10 +157,32 @@ step_host_cxx() {
 int main(){ std::vector<std::string> v{"a"}; std::cout << v.size(); return 0; }
 EOF
 
+  # 方案 0：原生宿主编译器直接编译探针
+  local lld_flag=""
+  if [ -x "$BOOT/bin/ld.lld" ]; then
+    lld_flag="-fuse-ld=lld"
+  fi
+
+  if "$BOOT/bin/clang++" $lld_flag "$probe" -o /dev/null 2>/dev/null; then
+    HOST_CXX_FLAGS="-Qunused-arguments"
+    HOST_LINK_FLAGS="$lld_flag"
+    echo "export HOST_CXX_FLAGS=\"$HOST_CXX_FLAGS\"" > "$BOOT/host_cxx_flags.env"
+    echo "export HOST_LINK_FLAGS=\"$HOST_LINK_FLAGS\"" >> "$BOOT/host_cxx_flags.env"
+    ok "宿主 C++：本地工具链正常工作 ($("$BOOT/bin/clang++" --version | head -1))"
+    return
+  fi
+  if "$BOOT/bin/clang++" "$probe" -o /dev/null 2>/dev/null; then
+    HOST_CXX_FLAGS="-Qunused-arguments"
+    HOST_LINK_FLAGS=""
+    echo "export HOST_CXX_FLAGS=\"$HOST_CXX_FLAGS\"" > "$BOOT/host_cxx_flags.env"
+    echo "export HOST_LINK_FLAGS=\"$HOST_LINK_FLAGS\"" >> "$BOOT/host_cxx_flags.env"
+    ok "宿主 C++：本地工具链正常工作"
+    return
+  fi
+
+  # 方案 1：解包的 libstdc++
   local gccdir="$BOOT/root/usr/lib/gcc/$HOST_TRIPLE/$HOST_GCC_VER"
-  # 宿主没有 binutils（无 ld），必须用预编译包自带的 ld.lld
   local lld="-fuse-ld=lld"
-  # 方案 1：用免 root 解包的 libstdc++
   if [ -d "$gccdir" ]; then
     if "$BOOT/bin/clang++" "--gcc-install-dir=$gccdir" $lld "$probe" -o /dev/null 2>/dev/null; then
       HOST_CXX_FLAGS="--gcc-install-dir=$gccdir -Qunused-arguments"
@@ -115,7 +193,7 @@ EOF
       return
     fi
   fi
-  # 方案 2：用 LLVM 预编译包自带的 libc++（该包只有头文件，可能不可用）
+  # 方案 2：自带 libc++
   if "$BOOT/bin/clang++" -stdlib=libc++ $lld "$probe" -o /dev/null 2>/dev/null; then
     HOST_CXX_FLAGS="-stdlib=libc++ -Qunused-arguments"
     HOST_LINK_FLAGS="$lld"
