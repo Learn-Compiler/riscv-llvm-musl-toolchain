@@ -159,9 +159,9 @@ EOF
     echo "-static" >> "$INSTALL_TOOLCHAIN/bin/clang.cfg"
   fi
 
-  # 建立 clang++.cfg 与 ${T}.cfg 软链接，确保直接运行 clang/clang++ 均自动生效
+  # 建立 clang++.cfg 软链接，确保直接运行 clang/clang++ 自动生效 (不再创建冗余 ${T}.cfg 避免重复装载)
   ln -sf clang.cfg "$INSTALL_TOOLCHAIN/bin/clang++.cfg"
-  ln -sf clang.cfg "$INSTALL_TOOLCHAIN/bin/${T}.cfg"
+  rm -f "$INSTALL_TOOLCHAIN/bin/${T}.cfg"
 
   # ─── 6. 生成统一环境激活脚本 env.sh ──────────────────────────────────
   cat > "$SRC/env.sh" <<'ENV_EOF'
