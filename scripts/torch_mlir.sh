@@ -63,10 +63,26 @@ step_torch_mlir() {
     die "torch-mlir 源码未就绪 ($torch_src)，请通过 --torch-mlir-src 指定源码目录"
   fi
 
+  local mlir_cmake_dir=""
+  local llvm_cmake_dir=""
+  local mlir_tblgen_bin=""
+  local llvm_tblgen_bin=""
+  for d in "$INSTALL_AI/lib/cmake/mlir" "$INSTALL/lib/cmake/mlir"; do
+    if [ -f "$d/MLIRConfig.cmake" ]; then mlir_cmake_dir="$d"; break; fi
+  done
+  for d in "$INSTALL_AI/lib/cmake/llvm" "$INSTALL/lib/cmake/llvm"; do
+    if [ -f "$d/LLVMConfig.cmake" ]; then llvm_cmake_dir="$d"; break; fi
+  done
+  for b in "$INSTALL_AI/bin/mlir-tblgen" "$INSTALL/bin/mlir-tblgen"; do
+    if [ -x "$b" ]; then mlir_tblgen_bin="$b"; break; fi
+  done
+  for b in "$INSTALL_AI/bin/llvm-tblgen" "$INSTALL/bin/llvm-tblgen" "$BOOT/bin/llvm-tblgen"; do
+    if [ -x "$b" ]; then llvm_tblgen_bin="$b"; break; fi
+  done
+
   # 前置依赖检查：必须具备 MLIR CMake 配置与 TableGen
-  if [ ! -f "$INSTALL/lib/cmake/mlir/MLIRConfig.cmake" ] || [ ! -x "$INSTALL/bin/mlir-tblgen" ]; then
-    warn "未在 $INSTALL 中检测到完整的 MLIR 导出 ($INSTALL/lib/cmake/mlir/MLIRConfig.cmake)"
-    log "正在自动触发构建包含 MLIR 的 LLVM 工具链 ..."
+  if [ -z "$mlir_cmake_dir" ] || [ -z "$mlir_tblgen_bin" ]; then
+    warn "未检测到完整的 MLIR 导出，正在自动触发构建包含 MLIR 的 LLVM 核心 ..."
     LLVM_ENABLE_PROJECTS="${LLVM_ENABLE_PROJECTS:-clang;lld}"
     if [[ ";${LLVM_ENABLE_PROJECTS};" != *";mlir;"* ]]; then
       LLVM_ENABLE_PROJECTS="${LLVM_ENABLE_PROJECTS};mlir"
@@ -76,10 +92,14 @@ step_torch_mlir() {
     # shellcheck disable=SC1091
     source "$SCRIPT_DIR/llvm.sh"
     step_llvm
+    mlir_cmake_dir="$INSTALL/lib/cmake/mlir"
+    llvm_cmake_dir="$INSTALL/lib/cmake/llvm"
+    mlir_tblgen_bin="$INSTALL/bin/mlir-tblgen"
+    llvm_tblgen_bin="$INSTALL/bin/llvm-tblgen"
   fi
 
-  [ -f "$INSTALL/lib/cmake/mlir/MLIRConfig.cmake" ] || die "MLIRConfig.cmake 不存在，无法继续构建 torch-mlir"
-  [ -f "$INSTALL/lib/cmake/llvm/LLVMConfig.cmake" ] || die "LLVMConfig.cmake 不存在，无法继续构建 torch-mlir"
+  [ -f "$mlir_cmake_dir/MLIRConfig.cmake" ] || die "MLIRConfig.cmake 不存在，无法继续构建 torch-mlir"
+  [ -f "$llvm_cmake_dir/LLVMConfig.cmake" ] || die "LLVMConfig.cmake 不存在，无法继续构建 torch-mlir"
 
   # 保证宿主 CXX 参数有效（宿主构建，与 LLVM 保持一致的 ABI）
   if [ -z "${HOST_CXX_FLAGS:-}" ] || [ -z "${HOST_LINK_FLAGS:-}" ]; then
@@ -91,15 +111,15 @@ step_torch_mlir() {
   # 版本相容性探测与自检
   align_and_check_torch_mlir_version "$torch_src"
 
-  # 确保 LLVM 导出的依赖文件在 install 目录中完整存在（防止此前执行过 prune 导致 find_package 报错）
-  if [ ! -f "$INSTALL/bin/llvm-dwp" ] && [ -d "$BUILD" ] && [ -f "$BUILD/build.ninja" ]; then
-    log "检测到部分 LLVM 导出工具缺失（此前执行过 prune），正在从构建目录快速恢复..."
+  # 确保 LLVM 导出的依赖文件完整存在
+  if [ ! -f "$INSTALL/bin/llvm-dwp" ] && [ ! -f "$INSTALL_AI/bin/llvm-dwp" ] && [ -d "$BUILD" ] && [ -f "$BUILD/build.ninja" ]; then
+    log "检测到部分 LLVM 导出工具缺失，正在从构建目录快速恢复..."
     "$BOOT/bin/ninja" -C "$BUILD" install
   fi
 
-  log "配置并构建 torch-mlir (源码: $torch_src)"
+  log "配置并构建 torch-mlir 到统一 AI 目录 ($INSTALL_AI)"
   local TORCH_BUILD="$SRC/build-torch-mlir"
-  mkdir -p "$TORCH_BUILD"
+  mkdir -p "$TORCH_BUILD" "$INSTALL_AI"
   rm -rf "$TORCH_BUILD/CMakeCache.txt" "$TORCH_BUILD/CMakeFiles"
 
   local extra_torch_flags=()
@@ -107,21 +127,20 @@ step_torch_mlir() {
     read -r -a extra_torch_flags <<< "${TORCH_MLIR_EXTRA_CMAKE_ARGS}"
   fi
 
-  # 检查 stablehlo 子模块是否就绪，若缺失则禁用以保证 out-of-tree 构建平稳通行
+  # 检查 stablehlo 子模块是否就绪
   local enable_stablehlo="OFF"
   if [ -f "$torch_src/externals/stablehlo/CMakeLists.txt" ]; then
     enable_stablehlo="ON"
   fi
 
-  log "执行 CMake 配置 (Out-of-tree, StableHLO: $enable_stablehlo, Python: ${TORCH_MLIR_ENABLE_PYTHON:-OFF})"
+  log "执行 CMake 配置 (安装前缀: $INSTALL_AI, StableHLO: $enable_stablehlo, Python: ${TORCH_MLIR_ENABLE_PYTHON:-OFF})"
 
-  # 注意：torch-mlir 运行在宿主机上，需使用 $BOOT 引导编译器与 $HOST_CXX_FLAGS 编译，
-  # 避免误用以 riscv64 musl 为默认目标的目标端 clang
+  # 注意：torch-mlir 运行在宿主机上，需使用 $BOOT 引导编译器与 $HOST_CXX_FLAGS 编译
   "$BOOT/bin/cmake" -G Ninja \
     -S "$torch_src" \
     -B "$TORCH_BUILD" \
     -DCMAKE_BUILD_TYPE="$BUILD_TYPE" \
-    -DCMAKE_INSTALL_PREFIX="$INSTALL" \
+    -DCMAKE_INSTALL_PREFIX="$INSTALL_AI" \
     -DCMAKE_C_COMPILER="$BOOT/bin/clang" \
     -DCMAKE_CXX_COMPILER="$BOOT/bin/clang++" \
     -DCMAKE_C_FLAGS="$HOST_CXX_FLAGS" \
@@ -129,10 +148,10 @@ step_torch_mlir() {
     -DCMAKE_EXE_LINKER_FLAGS="$HOST_LINK_FLAGS" \
     -DCMAKE_SHARED_LINKER_FLAGS="$HOST_LINK_FLAGS" \
     -DCMAKE_MODULE_LINKER_FLAGS="$HOST_LINK_FLAGS" \
-    -DMLIR_DIR="$INSTALL/lib/cmake/mlir" \
-    -DLLVM_DIR="$INSTALL/lib/cmake/llvm" \
-    -DMLIR_TABLEGEN_EXE="$INSTALL/bin/mlir-tblgen" \
-    -DLLVM_TABLEGEN_EXE="$INSTALL/bin/llvm-tblgen" \
+    -DMLIR_DIR="$mlir_cmake_dir" \
+    -DLLVM_DIR="$llvm_cmake_dir" \
+    -DMLIR_TABLEGEN_EXE="$mlir_tblgen_bin" \
+    -DLLVM_TABLEGEN_EXE="$llvm_tblgen_bin" \
     -DTORCH_MLIR_OUT_OF_TREE_BUILD=ON \
     -DTORCH_MLIR_ENABLE_STABLEHLO="$enable_stablehlo" \
     -DTORCH_MLIR_ENABLE_TOSA="${TORCH_MLIR_ENABLE_TOSA:-OFF}" \

@@ -352,13 +352,50 @@ docker run --rm -v "$(pwd):/workspace" riscv-llvm-musl:latest ./build.sh --targe
 
 ---
 
+## 🏛️ 方案 C：现代化工具链解耦与统一 AI 编译器架构
+
+针对工具链产物混乱、底层交叉编译与上层 AI 框架耦合的问题，本工程采纳 **方案 C（统一 AI 编译器解耦布局）**：
+
+### 1. 核心目录划分
+- **`install-toolchain/`**（软链接兼容 `install-clang-musl/`）：
+  - **定位**：纯净、工业级的 RISC-V 64/32 C/C++ 交叉工具链（标准发布仅 ~100MB）。
+  - **内容**：仅包含 `clang`、`lld`、标准 `llvm-*` 二进制工具、三元组别名软链接与便携 `.cfg` 文件；目标端 `libc++` 头文件与纯静态 `sysroot/`。
+  - **无杂质**：彻底剔除宿主内部测试工具（`yaml-bench`、`UnicodeNameMappingGenerator` 等）与数百个宿主开发静态库（`libLLVM*.a`），避免头文件污染与空间膨胀。
+- **`install-ai/`**：
+  - **定位**：统一独立的 AI 编译器套件（MLIR 基础设施 + Torch-MLIR 前端）。
+  - **内容**：包含 `mlir-opt`、`torch-mlir-opt`、`mlir-translate`、`torch-mlir-lsp-server` 等全部 AI 编译工具、方言库（`libMLIR*.a`、`libTorchMLIR*.a`）与 C/C++ API 头文件。
+  - **联合调试便利**：同目录部署使得从 PyTorch 算子下发到 MLIR 管道降级调试顺滑畅通：
+    ```bash
+    torch-mlir-opt input.mlir -torch-backend-to-linalg-on-tensors-backend-pipeline | mlir-opt -convert-linalg-to-loops
+    ```
+
+### 2. 环境一键激活 (`env.sh`)
+构建完成后，工程根目录与安装目录下均提供 `env.sh`。只需一行指令即可将工具链与 AI 编译器无缝导出至当前终端：
+```bash
+source env.sh
+```
+
+---
+
 ## 📂 仓库结构
 
 ```text
 riscv-llvm-musl-toolchain/
 ├── build.sh                      # 【主入口】参数解析、环境加载、流水线编排调度
+├── env.sh                        # 【环境激活】自动将 install-toolchain 与 install-ai 导出至 PATH
 ├── Dockerfile                    # 【容器化】标准化 100% 可重现构建环境镜像配置
 ├── .dockerignore                 # Docker 构建上下文忽略文件
+│
+├── install-toolchain/            # 【底层产物】纯净 RISC-V 交叉工具链 (软链接 install-clang-musl 指向此处)
+│   ├── bin/                      # clang, lld, llvm-ar 及三元组别名
+│   ├── include/c++/v1/           # 目标 libc++ C++ 标准库头文件
+│   ├── lib/clang/23/             # compiler-rt (builtins/crt)
+│   └── sysroot/                  # 纯静态 Musl libc.a, Linux headers, crt*.o
+│
+├── install-ai/                   # 【AI 编译器】统一 MLIR 与 Torch-MLIR 产物
+│   ├── bin/                      # mlir-opt, torch-mlir-opt, mlir-translate, mlir-tblgen
+│   ├── include/                  # mlir/, mlir-c/, torch-mlir/ 方言头文件
+│   └── lib/                      # libMLIR*.a, libTorchMLIR*.a, cmake 导出
 │
 ├── config/                       # 【配置层】纯声明式环境与目标配置
 │   ├── default.env               # 全局通用配置（版本、依赖 URL、自适应并发、ccache 开关）
@@ -375,24 +412,19 @@ riscv-llvm-musl-toolchain/
 │   └── linux-headers/            # Linux 内核 UAPI 头文件 (@ master / sabotage-linux)
 │
 ├── scripts/                      # 【执行层】模块化独立步骤流水线
-│   ├── common.sh                 # 公共基础设施（RAM 感知并发计算、日志、断点续传下载）
+│   ├── common.sh                 # 公共基础设施（RAM 感知并发计算、路径初始化）
 │   ├── bootstrap.sh              # 阶段 1：智能探测本地工具（含 ccache、cmake、ninja、clang）
 │   ├── fetch.sh                  # 阶段 2：准备源码 (Submodule 更新或挂载本地源码) 并自动应用补丁
 │   ├── llvm.sh                   # 阶段 3：全量构建 LLVM 核心交叉编译器本体 (支持 ccache)
-│   ├── runtimes.sh               # 阶段 4：解耦编译全套目标运行时 (支持 step_musl, step_compiler_rt, step_libcxx)
-│   ├── torch_mlir.sh             # 扩展阶段：配置并构建 torch-mlir 插件组件 (torch-mlir-opt)
-│   ├── prune.sh                  # 阶段 5：精简裁剪、Strip、三元组软链接与生成 .cfg 配置文件
-│   ├── verify.sh                 # 阶段 6：构建产物自愈检查与 C/C++/RVV 矢量冒烟测试
-│   └── package.sh                # 阶段 7：打包发布 (tar.zst) 与计算 SHA256 校验和
+│   ├── runtimes.sh               # 阶段 4：解耦编译全套目标运行时 (支持 musl, compiler-rt, libcxx)
+│   ├── torch_mlir.sh             # 阶段 5：配置并构建 torch-mlir 插件到 install-ai/
+│   ├── prune.sh                  # 阶段 6：架构隔离修整、生成 .cfg 与 env.sh
+│   ├── verify.sh                 # 阶段 7：构建产物检查、C/C++/RVV 冒烟测试与 AI 联合管道测试
+│   └── package.sh                # 阶段 8：打包发布工具链与 AI 编译器 (tar.zst) 并计算 SHA256
 │
 ├── patches/                      # 【拓展层】组件补丁目录（自动检测应用）
-│   ├── llvm/                     # LLVM 自定义补丁 (*.patch)
-│   ├── musl/                     # Musl 自定义补丁 (*.patch)
-│   ├── torch-mlir/               # torch-mlir 自定义补丁 (*.patch)
-│   └── linux-headers/            # linux-headers 自定义补丁 (*.patch)
-│
 ├── linux-headers/                # 根目录兼容软链接 (指向 third_party/linux-headers)
-├── .gitmodules                   # Git Submodule 配置声明 (llvm, musl, torch-mlir, linux-headers)
+├── .gitmodules                   # Git Submodule 配置声明
 ├── .gitignore                    # 忽略构建缓存与本地配置
 └── README.md                     # 架构与使用文档
 ```

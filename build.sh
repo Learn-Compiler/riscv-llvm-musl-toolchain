@@ -125,6 +125,8 @@ CLI_LINUX_HEADERS_REF=""
 CLI_LINUX_HEADERS_SRC=""
 CLI_JOBS=""
 CLI_ENABLE_CCACHE=""
+CLI_INSTALL_TOOLCHAIN=""
+CLI_INSTALL_AI=""
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -334,6 +336,16 @@ while [ $# -gt 0 ]; do
       CLI_ENABLE_CCACHE="OFF"
       shift
       ;;
+    --install-toolchain|--install-dir)
+      [ -n "${2:-}" ] || die "$1 需要指定目录"
+      CLI_INSTALL_TOOLCHAIN="$2"
+      shift 2
+      ;;
+    --install-ai)
+      [ -n "${2:-}" ] || die "$1 需要指定目录"
+      CLI_INSTALL_AI="$2"
+      shift 2
+      ;;
     --target)
       [ -n "${2:-}" ] || die "--target 需要指定目标名称"
       TARGET="$2"
@@ -341,13 +353,13 @@ while [ $# -gt 0 ]; do
       ;;
     --clean)
       log "清理构建缓存与时间戳 ..."
-      rm -rf "$STAMPS" "$BUILD" "$SRC/build-compiler-rt" "$SRC/build-runtimes" "$INSTALL" "$SHIM"
+      rm -rf "$STAMPS" "$BUILD" "$SRC/build-compiler-rt" "$SRC/build-runtimes" "$SRC/build-torch-mlir" "${INSTALL_TOOLCHAIN:-$INSTALL}" "${INSTALL_AI:-$SRC/install-ai}" "$SRC/install-clang-musl" "$SRC/env.sh" "$SHIM"
       ok "清理完成"
       exit 0
       ;;
     --clean-all)
       log "完全清理构建缓存与引导环境 ..."
-      rm -rf "$STAMPS" "$BUILD" "$SRC/build-compiler-rt" "$SRC/build-runtimes" "$INSTALL" "$SHIM" "$BOOT"
+      rm -rf "$STAMPS" "$BUILD" "$SRC/build-compiler-rt" "$SRC/build-runtimes" "$SRC/build-torch-mlir" "${INSTALL_TOOLCHAIN:-$INSTALL}" "${INSTALL_AI:-$SRC/install-ai}" "$SRC/install-clang-musl" "$SRC/env.sh" "$SHIM" "$BOOT"
       ok "全部清理完成"
       exit 0
       ;;
@@ -361,6 +373,8 @@ done
 init_config
 [ -n "$CLI_JOBS" ]                && JOBS="$CLI_JOBS"
 [ -n "$CLI_ENABLE_CCACHE" ]       && ENABLE_CCACHE="$CLI_ENABLE_CCACHE"
+[ -n "${CLI_INSTALL_TOOLCHAIN:-}" ] && { INSTALL_TOOLCHAIN="$CLI_INSTALL_TOOLCHAIN"; INSTALL="$CLI_INSTALL_TOOLCHAIN"; }
+[ -n "${CLI_INSTALL_AI:-}" ]        && INSTALL_AI="$CLI_INSTALL_AI"
 [ -n "$CLI_BUILD_TYPE" ]          && BUILD_TYPE="$CLI_BUILD_TYPE"
 [ -n "$CLI_RUNTIMES_BUILD_TYPE" ] && RUNTIMES_BUILD_TYPE="$CLI_RUNTIMES_BUILD_TYPE"
 [ -n "$CLI_ASSERTIONS" ]          && ENABLE_ASSERTIONS="$CLI_ASSERTIONS"
@@ -505,6 +519,20 @@ source "$SRC/scripts/package.sh"
 
 run_step() {
   local step="$1"
+
+  # ─── 隐式前置：任何步骤都依赖引导工具链 ────────────────────────────────
+  # bootstrap 负责探测宿主的 cmake / ninja / make / clang(或 gcc) 并软链进
+  # $BOOT/bin。缺少它时，`--step llvm` 这类单步执行会直接崩在缺编译器上。
+  # step_bootstrap 幂等（is_done bootstrap 会立刻返回），可以放心隐式调用。
+  if [ "$step" != "bootstrap" ]; then
+    if [ ! -x "$BOOT/bin/clang++" ] || ! is_done bootstrap; then
+      unmark bootstrap
+      log "引导工具链缺失或不完整，自动先执行 bootstrap"
+      step_bootstrap
+      step_host_cxx
+    fi
+  fi
+
   case "$step" in
     bootstrap)
       step_bootstrap
@@ -626,10 +654,14 @@ if [ "$DO_PACKAGE" = 1 ]; then
 fi
 
 log "全部流程已顺利完成！"
-printf '工具链安装路径: %s\n' "$INSTALL"
-printf '三元组别名调用: %s/bin/%s-clang hello.c\n' "$INSTALL" "$T"
-printf '标准参数调用  : %s/bin/clang --target=%s --sysroot=%s hello.c\n' "$INSTALL" "$T" "$SYSROOT"
+printf '底层交叉工具链路径: %s\n' "$INSTALL"
+if [ -d "${INSTALL_AI:-$SRC/install-ai}" ]; then
+  printf '统一 AI 编译器路径: %s\n' "${INSTALL_AI:-$SRC/install-ai}"
+fi
+printf '环境一键激活脚本  : source %s/env.sh\n' "$SRC"
+printf '三元组别名调用    : %s/bin/%s-clang hello.c\n' "$INSTALL" "$T"
+printf '标准参数调用      : %s/bin/clang --target=%s --sysroot=%s hello.c\n' "$INSTALL" "$T" "$SYSROOT"
 
 BUILD_END_TIME=$(date +%s)
 ELAPSED=$((BUILD_END_TIME - BUILD_START_TIME))
-printf '总计构建耗时  : %d分 %d秒\n' "$((ELAPSED / 60))" "$((ELAPSED % 60))" 
+printf '总计构建耗时      : %d分 %d秒\n' "$((ELAPSED / 60))" "$((ELAPSED % 60))" 

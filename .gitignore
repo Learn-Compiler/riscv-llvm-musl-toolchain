@@ -3,7 +3,8 @@
 /.build-stamps/
 /.musl-shim/
 /build-*/
-/install-*/
+/install-*
+/env.sh
 /*.log
 /*.tar.zst
 /SHA256SUMS

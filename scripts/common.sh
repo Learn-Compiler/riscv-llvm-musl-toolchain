@@ -10,7 +10,9 @@ if [ -z "${SRC:-}" ]; then
   SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 fi
 
-INSTALL="${INSTALL:-$SRC/install-clang-musl}"
+INSTALL_TOOLCHAIN="${INSTALL_TOOLCHAIN:-${INSTALL:-$SRC/install-toolchain}}"
+INSTALL_AI="${INSTALL_AI:-$SRC/install-ai}"
+INSTALL="${INSTALL_TOOLCHAIN}"
 SYSROOT="${SYSROOT:-$INSTALL/sysroot}"
 BUILD="${BUILD:-$SRC/build-llvm-musl}"
 BUILD_RUNTIMES="${BUILD_RUNTIMES:-$SRC/build-runtimes}"

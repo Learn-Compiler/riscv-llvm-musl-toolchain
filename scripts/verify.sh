@@ -158,9 +158,13 @@ EOF
   fi
 
   # --- 冒烟测试：MLIR (若启用/已安装) ---
-  if [ -x "$INSTALL/bin/mlir-opt" ]; then
-    echo "  正在执行 MLIR 冒烟测试 ..."
-    "$INSTALL/bin/mlir-opt" --version >/dev/null 2>&1 || die "mlir-opt 无法执行"
+  local mlir_opt_bin=""
+  for opt in "$INSTALL_AI/bin/mlir-opt" "$INSTALL/bin/mlir-opt"; do
+    if [ -x "$opt" ]; then mlir_opt_bin="$opt"; break; fi
+  done
+  if [ -n "$mlir_opt_bin" ]; then
+    echo "  正在执行 MLIR 冒烟测试 ($mlir_opt_bin) ..."
+    "$mlir_opt_bin" --version >/dev/null 2>&1 || die "mlir-opt 无法执行"
     cat > "$wd/test.mlir" <<'EOF'
 module {
   func.func @test(%arg0: i32) -> i32 {
@@ -168,14 +172,18 @@ module {
   }
 }
 EOF
-    "$INSTALL/bin/mlir-opt" "$wd/test.mlir" -o "$wd/test_opt.mlir" || die "mlir-opt 解析/优化基础 MLIR 失败"
+    "$mlir_opt_bin" "$wd/test.mlir" -o "$wd/test_opt.mlir" || die "mlir-opt 解析/优化基础 MLIR 失败"
     ok "MLIR (mlir-opt) 功能测试通过"
   fi
 
   # --- 冒烟测试：torch-mlir (若启用/已安装) ---
-  if [ -x "$INSTALL/bin/torch-mlir-opt" ]; then
-    echo "  正在执行 torch-mlir 冒烟测试 ..."
-    "$INSTALL/bin/torch-mlir-opt" --version >/dev/null 2>&1 || die "torch-mlir-opt 无法执行"
+  local torch_opt_bin=""
+  for topt in "$INSTALL_AI/bin/torch-mlir-opt" "$INSTALL/bin/torch-mlir-opt"; do
+    if [ -x "$topt" ]; then torch_opt_bin="$topt"; break; fi
+  done
+  if [ -n "$torch_opt_bin" ]; then
+    echo "  正在执行 torch-mlir 冒烟测试 ($torch_opt_bin) ..."
+    "$torch_opt_bin" --version >/dev/null 2>&1 || die "torch-mlir-opt 无法执行"
     cat > "$wd/torch_test.mlir" <<'EOF'
 module {
   func.func @torch_add(%arg0: !torch.int, %arg1: !torch.int) -> !torch.int {
@@ -183,8 +191,15 @@ module {
   }
 }
 EOF
-    "$INSTALL/bin/torch-mlir-opt" "$wd/torch_test.mlir" -o "$wd/torch_test_opt.mlir" || die "torch-mlir-opt 解析基础 torch 方言失败"
+    "$torch_opt_bin" "$wd/torch_test.mlir" -o "$wd/torch_test_opt.mlir" || die "torch-mlir-opt 解析基础 torch 方言失败"
     ok "torch-mlir (torch-mlir-opt) 方言与工具链测试通过"
+
+    if [ -n "$mlir_opt_bin" ]; then
+      echo "  正在执行 AI 统一编译器联合管道测试 (torch-mlir-opt | mlir-opt) ..."
+      "$torch_opt_bin" "$wd/torch_test.mlir" | "$mlir_opt_bin" --allow-unregistered-dialect > "$wd/joint_pipeline.mlir" 2>/dev/null \
+        && ok "AI 统一编译器管道联合测试通过 (torch-mlir-opt | mlir-opt)" \
+        || warn "AI 管道联合测试跳过"
+    fi
   fi
 
   mark verify

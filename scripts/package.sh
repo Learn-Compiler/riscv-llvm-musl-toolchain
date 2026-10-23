@@ -22,6 +22,16 @@ step_package() {
   rm -rf "$name"
   sha256sum "$out" | tee SHA256SUMS
   ok "发布产物就绪：$SRC/$out"
+
+  if [ -d "${INSTALL_AI:-$SRC/install-ai}" ]; then
+    local ai_name="${name}-ai-compiler"
+    local ai_out="${ai_name}-$(date +%Y%m%d).tar.zst"
+    rm -rf "$ai_name" && cp -a "${INSTALL_AI:-$SRC/install-ai}" "$ai_name"
+    tar -cf - "$ai_name" | zstd -T0 -19 -o "$ai_out"
+    rm -rf "$ai_name"
+    sha256sum "$ai_out" | tee -a SHA256SUMS
+    ok "AI 统一编译器发布产物就绪：$SRC/$ai_out"
+  fi
 }
 
 # 独立运行支持

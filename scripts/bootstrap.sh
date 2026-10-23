@@ -21,6 +21,18 @@ find_system_binary() {
   return 1
 }
 
+# 带版本回退的查找：先找精确名字，再依次找 <name>-<N>。
+# 例如 clang -> clang-21 … clang-5，gcc -> gcc-14 … gcc-5。
+# Ubuntu/Debian 的 clang-N 包通常只提供版本化名字，没有 /usr/bin/clang。
+find_system_binary_versioned() {
+  local name="$1" max="${2:-30}" min="${3:-5}" v p
+  if p="$(find_system_binary "$name")"; then echo "$p"; return 0; fi
+  for (( v=max; v>=min; v-- )); do
+    if p="$(find_system_binary "${name}-${v}")"; then echo "$p"; return 0; fi
+  done
+  return 1
+}
+
 step_bootstrap() {
   if is_done bootstrap; then
     ok "引导工具已就绪，跳过"
@@ -86,37 +98,52 @@ step_bootstrap() {
     die "未检测到 make，请先安装 make (如 apt install -y make)"
   fi
 
-  # ---- 4. 宿主 C/C++ 编译器 (优先本地) ----
+  # ---- 4. 宿主 C/C++ 编译器 (优先本地，支持 clang-17 / gcc-13 这类版本化名字) ----
   local sys_cc="" sys_cxx=""
   local f_clang f_clangxx f_gcc f_gxx
-  f_clang="$(find_system_binary clang || true)"
-  f_clangxx="$(find_system_binary clang++ || true)"
-  f_gcc="$(find_system_binary gcc || true)"
-  f_gxx="$(find_system_binary g++ || true)"
+  f_clang="$(find_system_binary_versioned clang 30 5 || true)"
+  f_clangxx="$(find_system_binary_versioned clang++ 30 5 || true)"
+  f_gcc="$(find_system_binary_versioned gcc 30 5 || true)"
+  f_gxx="$(find_system_binary_versioned g++ 30 5 || true)"
 
   if [ -n "$f_clang" ] && [ -n "$f_clangxx" ]; then
     sys_cc="$f_clang"
     sys_cxx="$f_clangxx"
-    ok "检测到宿主 Clang 编译器: $("$sys_cxx" --version | head -1)"
+    ok "检测到宿主 Clang 编译器: $("$sys_cxx" --version | head -1) [$sys_cxx]"
   elif [ -n "$f_gcc" ] && [ -n "$f_gxx" ]; then
     sys_cc="$f_gcc"
     sys_cxx="$f_gxx"
-    ok "检测到宿主 GCC 编译器: $("$sys_cxx" --version | head -1)"
+    ok "检测到宿主 GCC 编译器: $("$sys_cxx" --version | head -1) [$sys_cxx]"
   else
-    die "未检测到宿主 C/C++ 编译器 (clang/gcc)，请先安装基础编译工具 (如 apt-get install -y build-essential clang)"
+    die "未检测到宿主 C/C++ 编译器 (clang / clang-N / gcc / gcc-N)
+    请先安装基础编译工具，例如 Ubuntu：
+        sudo apt-get install -y build-essential clang"
   fi
+
+  # 记录编译器家族（clang 与 gcc 接受的参数不同），供 step_host_cxx 使用
+  local ccver family
+  ccver="$("$sys_cc" --version 2>/dev/null | head -1 || true)"
+  case "$ccver" in
+    *[Cc]lang*) family="clang" ;;
+    *)          family="gcc" ;;
+  esac
+  export HOST_CC_FAMILY="$family"
+  printf 'export HOST_CC_FAMILY="%s"\n' "$HOST_CC_FAMILY" > "$BOOT/host_cc_family.env"
+  ok "宿主编译器家族: $HOST_CC_FAMILY"
 
   ln -sf "$sys_cc" "$BOOT/bin/clang"
   ln -sf "$sys_cxx" "$BOOT/bin/clang++"
   local sys_lld
-  sys_lld="$(find_system_binary ld.lld || find_system_binary lld || true)"
+  sys_lld="$(find_system_binary_versioned ld.lld 30 5 \
+             || find_system_binary_versioned lld 30 5 || true)"
   if [ -n "$sys_lld" ]; then
     ln -sf "$sys_lld" "$BOOT/bin/ld.lld"
     ln -sf "$sys_lld" "$BOOT/bin/lld"
   fi
   for t in ar ranlib strip nm objcopy; do
     local sys_tool
-    sys_tool="$(find_system_binary "llvm-$t" || find_system_binary "$t" || true)"
+    sys_tool="$(find_system_binary_versioned "llvm-$t" 30 5 \
+                || find_system_binary_versioned "$t" 30 5 || true)"
     if [ -n "$sys_tool" ]; then
       ln -sf "$sys_tool" "$BOOT/bin/llvm-$t"
     fi
@@ -143,8 +170,27 @@ step_bootstrap() {
 }
 
 # 选定宿主 C++ 编译方式（决定 CMAKE_CXX_FLAGS 并持久化至 host_cxx_flags.env）
+# 支持单独执行本步骤：缺少引导环境时给出明确指引，而不是「probe.cc 没有那个文件」
 step_host_cxx() {
   log "确定宿主 C++ 编译方式"
+
+  # 单独执行时 $BOOT 可能还不存在，先建目录，否则下面的重定向直接失败
+  mkdir -p "$BOOT"
+
+  # 复用 step_bootstrap 记录的编译器家族
+  if [ -f "$BOOT/host_cc_family.env" ]; then
+    # shellcheck disable=SC1090
+    source "$BOOT/host_cc_family.env"
+  fi
+
+  if [ ! -x "$BOOT/bin/clang++" ]; then
+    die "缺少引导 C++ 编译器（$BOOT/bin/clang++）
+    引导环境尚未准备。请先执行 bootstrap 步骤：
+        ./build.sh --step bootstrap
+    或直接跑完整流程：
+        ./build.sh"
+  fi
+
   local probe="$BOOT/probe.cc"
   cat > "$probe" <<'PROBE_EOF'
 #include <vector>
@@ -153,29 +199,45 @@ step_host_cxx() {
 int main(){ std::vector<std::string> v{"a"}; std::cout << v.size(); return 0; }
 PROBE_EOF
 
+  # -Qunused-arguments 只有 clang 认识，gcc 传了会直接报错。
+  # 这里做能力探测而不是按名字猜，clang / gcc / 其它都能正确适配。
+  local fam_flags=""
+  # shellcheck disable=SC2086
+  if "$BOOT/bin/clang++" -Qunused-arguments -c "$probe" -o /dev/null >/dev/null 2>&1; then
+    fam_flags="-Qunused-arguments"
+  fi
+
   local lld_flag=""
   if [ -x "$BOOT/bin/ld.lld" ]; then
     lld_flag="-fuse-ld=lld"
   fi
 
-  if "$BOOT/bin/clang++" $lld_flag "$probe" -o /dev/null 2>/dev/null; then
-    HOST_CXX_FLAGS="-Qunused-arguments"
+  local cc_desc
+  cc_desc="$("$BOOT/bin/clang++" --version 2>/dev/null | head -1 || true)"
+
+  # shellcheck disable=SC2086
+  if "$BOOT/bin/clang++" $lld_flag $fam_flags "$probe" -o /dev/null 2>/dev/null; then
+    HOST_CXX_FLAGS="$fam_flags"
     HOST_LINK_FLAGS="$lld_flag"
-    echo "export HOST_CXX_FLAGS=\"$HOST_CXX_FLAGS\"" > "$BOOT/host_cxx_flags.env"
-    echo "export HOST_LINK_FLAGS=\"$HOST_LINK_FLAGS\"" >> "$BOOT/host_cxx_flags.env"
-    ok "宿主 C++：本地工具链正常工作 ($("$BOOT/bin/clang++" --version | head -1))"
-    return
-  fi
-  if "$BOOT/bin/clang++" "$probe" -o /dev/null 2>/dev/null; then
-    HOST_CXX_FLAGS="-Qunused-arguments"
-    HOST_LINK_FLAGS=""
-    echo "export HOST_CXX_FLAGS=\"$HOST_CXX_FLAGS\"" > "$BOOT/host_cxx_flags.env"
-    echo "export HOST_LINK_FLAGS=\"$HOST_LINK_FLAGS\"" >> "$BOOT/host_cxx_flags.env"
-    ok "宿主 C++：本地工具链正常工作"
+    printf 'export HOST_CXX_FLAGS="%s"\n'  "$HOST_CXX_FLAGS"  >  "$BOOT/host_cxx_flags.env"
+    printf 'export HOST_LINK_FLAGS="%s"\n' "$HOST_LINK_FLAGS" >> "$BOOT/host_cxx_flags.env"
+    ok "宿主 C++：$cc_desc${lld_flag:+（链接器 ld.lld）}"
     return
   fi
 
-  die "宿主 C++ 编译器无法编译基础测试程序，请检查宿主开发环境与 C++ 标准库"
+  # shellcheck disable=SC2086
+  if "$BOOT/bin/clang++" $fam_flags "$probe" -o /dev/null 2>/dev/null; then
+    HOST_CXX_FLAGS="$fam_flags"
+    HOST_LINK_FLAGS=""
+    printf 'export HOST_CXX_FLAGS="%s"\n'  "$HOST_CXX_FLAGS"  >  "$BOOT/host_cxx_flags.env"
+    printf 'export HOST_LINK_FLAGS="%s"\n' "$HOST_LINK_FLAGS" >> "$BOOT/host_cxx_flags.env"
+    ok "宿主 C++：$cc_desc（系统默认链接器）"
+    return
+  fi
+
+  die "宿主 C++ 编译器无法编译基础测试程序（$cc_desc）
+    请检查宿主 C++ 标准库是否完整，例如 Ubuntu：
+        sudo apt-get install -y build-essential"
 }
 
 # 独立运行支持
