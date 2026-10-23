@@ -130,31 +130,27 @@ EOF
     ok "RVV (Vector 1.0) 矢量编译冒烟测试通过"
   fi
 
-  # --- 冒烟测试：三元组别名与 .cfg 免参数编译 ---
-  if [ -x "$INSTALL/bin/${T}-clang" ]; then
-    "$INSTALL/bin/${T}-clang" "$wd/hello.c" -o "$wd/hello-cfg"
-    file "$wd/hello-cfg" | grep -q "${SMOKE_TEST_PATTERN:-UCB RISC-V}" \
-      || die "三元组前缀 clang 编译测试失败"
-    if [ "${DEFAULT_STATIC_LINK:-ON}" = "ON" ]; then
-      file "$wd/hello-cfg" | grep -q "statically linked" \
-        || die "三元组别名 ${T}-clang 未默认静态链接"
-      ok "三元组别名 ${T}-clang (.cfg 自动装载) 默认静态链接成功"
-    else
-      ok "三元组别名 ${T}-clang (.cfg 自动装载) 编译成功"
-    fi
+  # --- 冒烟测试：直接调用 clang / clang++ 免参数编译 (自动装载 clang.cfg) ---
+  "$INSTALL/bin/clang" "$wd/hello.c" -o "$wd/hello-cfg"
+  file "$wd/hello-cfg" | grep -q "${SMOKE_TEST_PATTERN:-UCB RISC-V}" \
+    || die "直接调用 clang 编译测试失败"
+  if [ "${DEFAULT_STATIC_LINK:-ON}" = "ON" ]; then
+    file "$wd/hello-cfg" | grep -q "statically linked" \
+      || die "直接调用 clang 未默认静态链接"
+    ok "直接调用 clang (clang.cfg 自动装载) 默认静态链接成功"
+  else
+    ok "直接调用 clang (clang.cfg 自动装载) 编译成功"
   fi
 
-  if [ -x "$INSTALL/bin/${T}-clang++" ]; then
-    "$INSTALL/bin/${T}-clang++" "$wd/h.cpp" -o "$wd/h-cfg"
-    file "$wd/h-cfg" | grep -q "${SMOKE_TEST_PATTERN:-UCB RISC-V}" \
-      || die "三元组前缀 clang++ 编译测试失败"
-    if [ "${DEFAULT_STATIC_LINK:-ON}" = "ON" ]; then
-      file "$wd/h-cfg" | grep -q "statically linked" \
-        || die "三元组别名 ${T}-clang++ 未默认静态链接"
-      ok "三元组别名 ${T}-clang++ (.cfg 自动装载) 默认静态链接成功"
-    else
-      ok "三元组别名 ${T}-clang++ (.cfg 自动装载) 编译成功"
-    fi
+  "$INSTALL/bin/clang++" "$wd/h.cpp" -o "$wd/h-cfg"
+  file "$wd/h-cfg" | grep -q "${SMOKE_TEST_PATTERN:-UCB RISC-V}" \
+    || die "直接调用 clang++ 编译测试失败"
+  if [ "${DEFAULT_STATIC_LINK:-ON}" = "ON" ]; then
+    file "$wd/h-cfg" | grep -q "statically linked" \
+      || die "直接调用 clang++ 未默认静态链接"
+    ok "直接调用 clang++ (clang++.cfg 自动装载) 默认静态链接成功"
+  else
+    ok "直接调用 clang++ (clang++.cfg 自动装载) 编译成功"
   fi
 
   # --- 冒烟测试：MLIR (若启用/已安装) ---

@@ -96,14 +96,16 @@ step_prune() {
     llvm-modextract llvm-mt llvm-opt-report llvm-pdbutil llvm-profdata llvm-profgen
     llvm-readtapi llvm-reduce llvm-remarkutil llvm-rtdyld llvm-sim llvm-tli-checker
     llvm-undname llvm-xray obj2yaml yaml2obj
+    opt llc clang-linker-wrapper llvm-dwarfutil llvm-split llvm-gsymutil llvm-mc
+    llvm-extract llvm-cov llvm-link llvm-as llvm-dis llvm-config llvm-readobj
   )
 
   for b in "${useless_bins[@]}"; do
     rm -f "$INSTALL_TOOLCHAIN/bin/$b"
   done
 
-  # 移除静态分析器与无关头文件目录
-  rm -rf "$INSTALL_TOOLCHAIN/share/scan-view" "$INSTALL_TOOLCHAIN/share/scan-build" "$INSTALL_TOOLCHAIN/share/opt-viewer"
+  # 移除静态分析器与无关头文件及非必需的 share 目录 (man 手册与编辑器脚本)
+  rm -rf "$INSTALL_TOOLCHAIN/share"
   rm -rf "$INSTALL_TOOLCHAIN/lib/libear" "$INSTALL_TOOLCHAIN/lib/libscanbuild" "$INSTALL_TOOLCHAIN/libexec"
   rm -rf "$INSTALL_TOOLCHAIN/include/mach-o"
 
@@ -135,26 +137,12 @@ step_prune() {
     ok "保留二进制调试符号 (STRIP_SYMBOLS=$should_strip, BUILD_TYPE=$BUILD_TYPE)"
   fi
 
-  # ─── 4. 补全标准 llvm 工具符号链接与三元组软链接 ────────────────────
-  [ -e "$INSTALL_TOOLCHAIN/bin/llvm-readelf" ] || ln -sf llvm-readobj "$INSTALL_TOOLCHAIN/bin/llvm-readelf"
-
-  for tool in clang clang++ cpp ld ar as nm objcopy objdump ranlib readelf strip size strings; do
-    case "$tool" in
-      clang)   target="clang" ;;
-      clang++) target="clang++" ;;
-      cpp)     target="clang-cpp" ;;
-      ld)      target="ld.lld" ;;
-      as)      target="clang" ;;
-      ar|nm|objcopy|objdump|ranlib|readelf|strip|size|strings) target="llvm-$tool" ;;
-    esac
-    ln -sf "$target" "$INSTALL_TOOLCHAIN/bin/${T}-${tool}"
-  done
-  # 兼容 gcc / g++ 别名
-  ln -sf clang   "$INSTALL_TOOLCHAIN/bin/${T}-gcc"
-  ln -sf clang++ "$INSTALL_TOOLCHAIN/bin/${T}-g++"
+  # ─── 4. 净化三元组别名，保持 bin 目录极致纯净 ─────────────────────────
+  # 清理旧有的冗余三元组别名前缀工具，避免 17 个冗余软链接污染 bin 目录
+  rm -f "$INSTALL_TOOLCHAIN/bin/${T}-"*
 
   # ─── 5. 生成 Clang 自动装载的 .cfg 配置文件 ────────────────────────
-  cat > "$INSTALL_TOOLCHAIN/bin/${T}.cfg" <<EOF
+  cat > "$INSTALL_TOOLCHAIN/bin/clang.cfg" <<EOF
 --target=${TARGET_TRIPLE}
 --sysroot=<CFGDIR>/../sysroot
 -fuse-ld=lld
@@ -164,12 +152,16 @@ step_prune() {
 EOF
 
   if [ -n "${TARGET_EXTRA_CFLAGS:-}" ]; then
-    echo "${TARGET_EXTRA_CFLAGS}" >> "$INSTALL_TOOLCHAIN/bin/${T}.cfg"
+    echo "${TARGET_EXTRA_CFLAGS}" >> "$INSTALL_TOOLCHAIN/bin/clang.cfg"
   fi
 
   if [ "${DEFAULT_STATIC_LINK:-ON}" = "ON" ]; then
-    echo "-static" >> "$INSTALL_TOOLCHAIN/bin/${T}.cfg"
+    echo "-static" >> "$INSTALL_TOOLCHAIN/bin/clang.cfg"
   fi
+
+  # 建立 clang++.cfg 与 ${T}.cfg 软链接，确保直接运行 clang/clang++ 均自动生效
+  ln -sf clang.cfg "$INSTALL_TOOLCHAIN/bin/clang++.cfg"
+  ln -sf clang.cfg "$INSTALL_TOOLCHAIN/bin/${T}.cfg"
 
   # ─── 6. 生成统一环境激活脚本 env.sh ──────────────────────────────────
   cat > "$SRC/env.sh" <<'ENV_EOF'

@@ -30,9 +30,8 @@ get_target_tools() {
 # 确保 build-runtimes CMake 配置就绪
 ensure_runtimes_configured() {
   local RUNTIMES_BUILD="${BUILD_RUNTIMES:-$SRC/build-runtimes}"
-  local opt_level="${RUNTIMES_OPT_LEVEL:--O2}"
+  local opt_level="${RUNTIMES_OPT_LEVEL:-default}"
   mkdir -p "$RUNTIMES_BUILD"
-
   local opt_stamp="$RUNTIMES_BUILD/.opt_level"
   if [ -f "$RUNTIMES_BUILD/build.ninja" ] && [ -f "$opt_stamp" ] && [ "$(cat "$opt_stamp" 2>/dev/null)" = "$opt_level" ]; then
     return 0
@@ -50,16 +49,22 @@ ensure_runtimes_configured() {
   fi
 
   local target_cflags="${TARGET_EXTRA_CFLAGS:-}"
+  local opt_flags=()
+  if [ -n "${RUNTIMES_OPT_LEVEL:-}" ]; then
+    opt_flags=(
+      "-DCMAKE_C_FLAGS_RELEASE=${RUNTIMES_OPT_LEVEL} -DNDEBUG"
+      "-DCMAKE_CXX_FLAGS_RELEASE=${RUNTIMES_OPT_LEVEL} -DNDEBUG"
+      "-DCMAKE_ASM_FLAGS_RELEASE=${RUNTIMES_OPT_LEVEL}"
+      "-DCMAKE_C_FLAGS_RELWITHDEBINFO=${RUNTIMES_OPT_LEVEL} -g -DNDEBUG"
+      "-DCMAKE_CXX_FLAGS_RELWITHDEBINFO=${RUNTIMES_OPT_LEVEL} -g -DNDEBUG"
+    )
+  fi
 
   "$BOOT/bin/cmake" -G Ninja \
     -S "$LLVM_DIR/runtimes" \
     -B "$RUNTIMES_BUILD" \
     -DCMAKE_BUILD_TYPE="${RUNTIMES_BUILD_TYPE:-Release}" \
-    -DCMAKE_C_FLAGS_RELEASE="$opt_level -DNDEBUG" \
-    -DCMAKE_CXX_FLAGS_RELEASE="$opt_level -DNDEBUG" \
-    -DCMAKE_ASM_FLAGS_RELEASE="$opt_level" \
-    -DCMAKE_C_FLAGS_RELWITHDEBINFO="$opt_level -g -DNDEBUG" \
-    -DCMAKE_CXX_FLAGS_RELWITHDEBINFO="$opt_level -g -DNDEBUG" \
+    "${opt_flags[@]}" \
     -DCMAKE_INSTALL_PREFIX="$INSTALL" \
     -DCMAKE_C_COMPILER="$target_clang" \
     -DCMAKE_CXX_COMPILER="$target_clangxx" \
@@ -134,13 +139,17 @@ step_musl() {
     read -r -a musl_extra_flags <<< "${MUSL_EXTRA_ARGS}"
   fi
 
-  local musl_opt="${RUNTIMES_OPT_LEVEL:--O2}"
   local target_cflags="${TARGET_EXTRA_CFLAGS:-}"
+  local musl_cflags_arg=()
+  if [ -n "${RUNTIMES_OPT_LEVEL:-}" ]; then
+    musl_cflags_arg=("CFLAGS=${RUNTIMES_OPT_LEVEL} ${target_cflags}")
+  elif [ -n "${target_cflags:-}" ]; then
+    musl_cflags_arg=("CFLAGS=${target_cflags}")
+  fi
 
   CC="$target_clang --target=$T $target_cflags -fuse-ld=lld" \
   AR="$target_ar" \
   RANLIB="$target_ranlib" \
-  CFLAGS="$musl_opt $target_cflags" \
   ./configure \
       --target="$MUSL_TARGET" \
       --prefix=/usr \
@@ -149,7 +158,7 @@ step_musl() {
       --enable-static \
       "${musl_shared_flags[@]}" \
       "${musl_extra_flags[@]}" \
-      CFLAGS="$musl_opt $target_cflags"
+      "${musl_cflags_arg[@]}"
 
   make -j"$JOBS" AR="$target_ar" RANLIB="$target_ranlib"
   make DESTDIR="$SYSROOT" install
