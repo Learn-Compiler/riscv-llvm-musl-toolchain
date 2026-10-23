@@ -51,10 +51,10 @@ step_verify() {
   done
   [ -n "$crtdir" ] || die "找不到 clang 资源目录 $INSTALL/lib/clang/*"
   local missing=0
-  for f in clang_rt.crtbegin.o libclang_rt.crtbegin-riscv64.o libclang_rt.crtend-riscv64.o clang_rt.crtbegin-riscv64.o clang_rt.crtend-riscv64.o crtbegin.o crtend.o; do
-    if [ -e "$crtdir/$f" ]; then ok "找到 $f"; break; fi
+  for f in clang_rt.crtbegin.o libclang_rt.crtbegin-riscv64.o libclang_rt.crtend-riscv64.o clang_rt.crtbegin-riscv64.o clang_rt.crtend-riscv64.o crtbegin.o crtend.o "${RT_CRT_BEGIN:-}" "${RT_CRT_END:-}"; do
+    if [ -n "$f" ] && [ -e "$crtdir/$f" ]; then ok "找到 $f"; break; fi
   done
-  ls "$crtdir"/libclang_rt.builtins*.a >/dev/null 2>&1 \
+  { ls "$crtdir"/libclang_rt.builtins*.a >/dev/null 2>&1 || [ -e "$crtdir/${RT_BUILTIN_NAME:-}" ]; } \
     && ok "找到 libclang_rt.builtins" \
     || { echo "  ✗ 缺少 builtins"; missing=1; }
   [ "$missing" = 0 ] || die "compiler-rt 运行时缺失，工具链不可用"
@@ -79,10 +79,12 @@ EOF
   if [ "${ENABLE_SHARED:-OFF}" = "OFF" ] || [ "${DEFAULT_STATIC_LINK:-ON}" = "ON" ]; then
     c_static_flag="-static"
   fi
-  "$INSTALL/bin/clang" --target="$T" --sysroot="$SYSROOT" $c_static_flag \
+  local extra_cflags="${TARGET_EXTRA_CFLAGS:-}"
+
+  "$INSTALL/bin/clang" --target="$T" --sysroot="$SYSROOT" $extra_cflags $c_static_flag \
       "$wd/hello.c" -o "$wd/hello"
-  file "$wd/hello" | grep -q "${SMOKE_TEST_PATTERN:-UCB RISC-V}" \
-    || die "C 冒烟测试产物不是目标架构 (${SMOKE_TEST_PATTERN:-UCB RISC-V})"
+  file "$wd/hello" | grep -q "${SMOKE_TEST_PATTERN:-RISC-V}" \
+    || die "C 冒烟测试产物不是目标架构 (${SMOKE_TEST_PATTERN:-RISC-V})"
   if [ -n "$c_static_flag" ]; then
     file "$wd/hello" | grep -q "statically linked" \
       || die "C 冒烟测试产物不是静态链接"
@@ -98,16 +100,34 @@ EOF
 #include <string>
 int main(){ std::vector<std::string> v{"ok"}; std::cout << v[0] << "\n"; }
 EOF
-  "$INSTALL/bin/clang++" --target="$T" --sysroot="$SYSROOT" -stdlib=libc++ $c_static_flag \
+  "$INSTALL/bin/clang++" --target="$T" --sysroot="$SYSROOT" -stdlib=libc++ $extra_cflags $c_static_flag \
       "$wd/h.cpp" -o "$wd/h"
-  file "$wd/h" | grep -q "${SMOKE_TEST_PATTERN:-UCB RISC-V}" \
-    || die "C++ 冒烟测试产物不是目标架构 (${SMOKE_TEST_PATTERN:-UCB RISC-V})"
+  file "$wd/h" | grep -q "${SMOKE_TEST_PATTERN:-RISC-V}" \
+    || die "C++ 冒烟测试产物不是目标架构 (${SMOKE_TEST_PATTERN:-RISC-V})"
   if [ -n "$c_static_flag" ]; then
     file "$wd/h" | grep -q "statically linked" \
       || die "C++ 冒烟测试产物不是静态链接"
     ok "C++/libc++ 静态链接成功"
   else
     ok "C++/libc++ 动态链接成功"
+  fi
+
+  # --- 冒烟测试：RISC-V Vector 1.0 (RVV，若配置开启) ---
+  if [[ "${TARGET_EXTRA_CFLAGS:-}" == *"v"* ]]; then
+    cat > "$wd/vec.c" <<'EOF'
+#include <stdio.h>
+#include <riscv_vector.h>
+int main(void) {
+    size_t vl = __riscv_vsetvl_e32m1(4);
+    printf("RVV initialized with vl=%zu\n", vl);
+    return 0;
+}
+EOF
+    "$INSTALL/bin/clang" --target="$T" --sysroot="$SYSROOT" $extra_cflags $c_static_flag \
+        "$wd/vec.c" -o "$wd/vec"
+    file "$wd/vec" | grep -q "${SMOKE_TEST_PATTERN:-RISC-V}" \
+      || die "RVV 矢量测试程序产物不是目标架构"
+    ok "RVV (Vector 1.0) 矢量编译冒烟测试通过"
   fi
 
   # --- 冒烟测试：三元组别名与 .cfg 免参数编译 ---

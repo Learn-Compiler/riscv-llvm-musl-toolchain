@@ -74,6 +74,29 @@ fetch_file() {   # $1=url $2=dest
 }
 
 
+# ─── 自适应并发任务数探测 (兼顾 CPU 核心与物理内存，防 OOM) ─────────────
+detect_optimal_jobs() {
+  local ncpu mem_kb mem_gb max_jobs_by_mem jobs
+  ncpu=$(nproc 2>/dev/null || echo 4)
+  mem_kb=$(awk '/MemTotal/ {print $2}' /proc/meminfo 2>/dev/null || echo 0)
+  mem_gb=$(( mem_kb / 1024 / 1024 ))
+
+  if [ "$mem_gb" -gt 0 ]; then
+    # 每个 C++ 复杂编译/链接任务约预留 2GB 物理内存，防止高并发导致 OOM 崩溃
+    max_jobs_by_mem=$(( mem_gb / 2 ))
+    [ "$max_jobs_by_mem" -lt 1 ] && max_jobs_by_mem=1
+    if [ "$ncpu" -gt "$max_jobs_by_mem" ]; then
+      jobs="$max_jobs_by_mem"
+    else
+      jobs="$ncpu"
+    fi
+  else
+    jobs="$ncpu"
+  fi
+  [ "$jobs" -lt 1 ] && jobs=1
+  echo "$jobs"
+}
+
 # ─── 加载配置函数 ────────────────────────────────────────────────────────
 init_config() {
   # 1. 载入全局默认配置
@@ -94,7 +117,7 @@ init_config() {
     source "$SRC/config/local.env"
   fi
 
-  # 3. 载入目标平台配置
+  # 4. 载入目标平台配置
   TARGET="${TARGET:-riscv64-linux-musl}"
   local target_conf="$SRC/config/targets/${TARGET}.env"
   if [ -f "$target_conf" ]; then
@@ -104,9 +127,14 @@ init_config() {
     die "找不到目标平台配置文件: $target_conf"
   fi
 
-  # 4. 载入已探测持久化的宿主编译器编译参数（若已探测）
+  # 5. 载入已探测持久化的宿主编译器编译参数（若已探测）
   if [ -f "$BOOT/host_cxx_flags.env" ]; then
     # shellcheck disable=SC1091
     source "$BOOT/host_cxx_flags.env"
+  fi
+
+  # 6. 并行构建线程数探测与自适应计算
+  if [ "${JOBS:-auto}" = "auto" ] || [ -z "${JOBS:-}" ]; then
+    JOBS="$(detect_optimal_jobs)"
   fi
 }

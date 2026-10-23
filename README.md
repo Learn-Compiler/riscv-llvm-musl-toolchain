@@ -111,7 +111,23 @@ flowchart TD
 ./build.sh --static            # 显式指定仅构建目标静态库 (.a)（默认行为）
 ./build.sh --no-static-link    # 静态库模式下不默认向 .cfg 追加 -static (亦支持 --no-default-static)
 
-# 3. 灵活定制子项目、MLIR 与编译参数 (支持 torch-mlir 扩展)
+# 3. 目标架构变体 (Target Variants)
+./build.sh --target riscv64-linux-musl     # 默认标准 RISC-V 64 (rv64gc / lp64d)
+./build.sh --target riscv64-linux-musl-rvv # 启用 RVV 1.0 矢量扩展 (rv64gcv / lp64d，内置 .cfg 自动装载)
+./build.sh --target riscv32-linux-musl     # 切换至 RISC-V 32 Musl 目标平台
+
+# 4. 并发任务调度与 ccache 编译加速
+./build.sh -j 16               # 手动指定并行线程数 (默认 auto: 依据 CPU 与物理内存自适应计算防 OOM)
+./build.sh --ccache            # 强制启用 ccache 编译加速 (若系统无则自动下载免 root 引导版本)
+./build.sh --no-ccache         # 显式禁用 ccache 加速
+
+# 5. 独立子运行时编译 (极速二次开发迭代)
+./build.sh --step musl         # 仅独立编译并安装目标 C 运行库 (libc.a / Linux 头文件)
+./build.sh --step compiler-rt  # 仅独立编译目标编译器核心库 (libclang_rt.builtins.a / crtbegin.o)
+./build.sh --step libc++       # 仅独立编译目标 C++ 运行时 (libc++.a / libunwind.a 并自动融合 ABI)
+./build.sh --step runtimes     # 编排全套目标运行时流水线 (musl -> compiler-rt -> libc++)
+
+# 6. 灵活定制子项目、MLIR 与编译参数 (支持 torch-mlir 扩展)
 ./build.sh --enable-mlir                       # 启用 MLIR 子项目构建 (clang;lld;mlir)
 ./build.sh --enable-torch-mlir                 # 快捷启用 MLIR + torch-mlir 完整流水线构建
 ./build.sh --projects "clang;lld;mlir" --debug # 自定义启用的 LLVM 子项目列表
@@ -122,18 +138,15 @@ flowchart TD
 ./build.sh --llvm-src /path/to/custom-llvm     # 命令行直接挂载本地自研 LLVM 源码
 ./build.sh --musl-src /path/to/custom-musl     # 命令行直接挂载本地自研 Musl 源码
 
-# 4. 单步独立调试与维护
+# 7. 单步独立调试与维护
 ./build.sh --step llvm --debug           # 以调试模式单独重编 LLVM 模块
 ./build.sh --step runtimes --release --share # 以 Release 模式编译目标全套运行库并生成共享库 (.so)
-./build.sh --step torch-mlir             # 单独编译 torch-mlir 组件
-./build.sh --step verify                 # 单独运行产物校验与冒烟测试
+./build.sh --step verify                 # 单独运行产物校验与冒烟测试 (含 RVV/C/C++ 测试)
 ./build.sh --rebuild-llvm --debug        # 重编 LLVM 及运行库并开启调试模式
 ./build.sh --from llvm                   # 从 llvm 阶段开始向下连续执行至 verify
 ./build.sh --package                     # 构建完成后自动打包为 .tar.zst 离线发布包
 ./build.sh --clean                       # 清理编译临时目录与时间戳（保留 .bootstrap）
 ./build.sh --clean-all                   # 清理所有内容（包括 .bootstrap 引导环境）
-./build.sh --target riscv64-linux-musl   # 指定目标平台配置
-JOBS=8 ./build.sh                        # 控制并行编译核心数 (默认 6)
 ```
 
 ---
@@ -255,17 +268,105 @@ riscv64-unknown-linux-musl-clang -march=rv64gcv rvv_app.c -o rvv_app
 
 ---
 
+## ⚡ 独立子运行时编译与微调 (musl / compiler-rt / libc++)
+
+在二次开发底层库、调试 C 库系统调用或调整 C++ 异常处理机制时，重新跑全量流水线非常耗时。本工具链将阶段二的目标运行时彻底解耦为三个完全正交、可独立调度的子步骤：
+
+### 1. 核心子步骤与调用方式
+- **`./build.sh --step musl`**：
+  - 自动解包并同步 Linux 内核 UAPI 头文件至 `$SYSROOT/usr/include`；
+  - 使用当前已编译好的 Clang 独立编译并安装 Musl C 库生成 `libc.a`；
+  - 独立耗时：仅需 **~5 秒**。
+- **`./build.sh --step compiler-rt`**（兼容别名: `builtins`）：
+  - 依赖：自动保证 Musl C 库就绪；
+  - 独立通过 Ninja 目标编译并安装 `libclang_rt.builtins.a` 与 `clang_rt.crtbegin.o / crtend.o`；
+  - 自动部署至 Clang 资源库目录；
+  - 独立耗时：仅需 **~1 秒**。
+- **`./build.sh --step libc++`**（兼容别名: `libcxx`、`libunwind`）：
+  - 依赖：自动保证 Musl 与 compiler-rt 就绪；
+  - 独立编译 LLVM 官方 `libunwind`、`libc++` 与 `libc++abi`；
+  - 自动运行 `llvm-ar -M` MRI 脚本将 `libc++abi.a` 融合入静态 `libc++.a`，并同步部署至 `$SYSROOT`；
+  - 独立耗时：增量仅需 **~10 秒**。
+- **`./build.sh --step runtimes`**：
+  - 统一流水线入口，按顺序执行 `musl -> compiler-rt -> libc++` 并完成全套标记。
+
+### 2. 依赖链自动满足与时间戳状态机
+当您仅运行 `./build.sh --step libc++` 时，构建系统具备自动依赖回溯机制：若前置的 musl 或 compiler-rt 尚未构建，会自动按依赖拓扑完成前置步骤，再执行目标步骤；若前置步骤已完成，则利用时间戳跳过，实现瞬时增量编译。
+
+---
+
+## 🚀 性能优化与加速体系 (ccache & RAM 自适应调度)
+
+针对大型编译器项目编译消耗资源高、易 OOM、耗时长的痛点，工具链内置了两大关键优化：
+
+### 1. ccache 编译加速（秒级增量）
+- **自动探测与优雅降级 (`ENABLE_CCACHE=AUTO`)**：
+  默认情况下，脚本自动检测宿主机是否存在 `ccache`。若检测到则自动向 LLVM 与运行时 CMake 注入 `-DLLVM_CCACHE_BUILD=ON`，若无则平滑禁用，绝不中断构建。
+- **显式强制启用 (`--ccache`)**：
+  用户传入 `--ccache` 时，即使宿主未安装系统级 ccache，脚本也会通过免 root 引导机制自动下载官方自包含二进制至 `.bootstrap/bin/ccache` 并启用加速。
+- **显式禁用 (`--no-ccache`)**：关闭 ccache 缓存。
+
+### 2. 物理核心与 RAM 资源感知自适应调度 (Prevent OOM)
+- **业界痛点**：盲目使用 `make -j$(nproc)` 在 16 线程但仅有 16GB 内存的机器上编译 LLVM C++ 源码与进行 LLD 大文件链接时，瞬间消耗全部内存并触发 Linux OOM Killer 杀掉编译进程。
+- **智能计算公式**：
+  脚本读取 `/proc/meminfo` 的物理可用内存，按每个重型编译/链接任务预留 **2GB 物理内存** 进行并发数计算：
+  $$\text{JOBS} = \min\left(N_{\text{cpu}}, \max\left(1, \left\lfloor\frac{\text{RAM}_{\text{GB}}}{2}\right\rfloor\right)\right)$$
+  - 在 **32 核 128GB RAM** 高性能服务器上，自动跑满 **32 核心** 全速构建；
+  - 在 **16 核 16GB RAM** 机器上，自动将并发限制为 **8**，彻底杜绝 OOM 崩溃；
+  - 用户仍可随时通过 `-j <N>` 或 `--jobs <N>` 手动强制指定。
+
+---
+
+## 🎯 目标架构变体 (RVV 1.0 矢量扩展与 32位平台)
+
+除了默认的标量标准架构外，工具链支持通过纯声明式配置快速切换目标架构平台：
+
+| 平台名称 (`--target <名称>`) | 架构与 ABI | 默认配置特性与用途 |
+| :--- | :--- | :--- |
+| **`riscv64-linux-musl`** (默认) | RV64GC (lp64d) | 工业级标准 64 位通用计算平台，默认静态链接 |
+| **`riscv64-linux-musl-rvv`** | RV64GCV (lp64d) | **开启 RISC-V 矢量 1.0 (Vector 1.0)** 扩展，内置 `.cfg` 自动注入 `-march=rv64gcv -mabi=lp64d`，并附带 RVV C Intrinsics 冒烟测试 |
+| **`riscv32-linux-musl`** | RV32IMAFDC (ilp32d) | 面向嵌入式与资源敏感型 RISC-V 32 位应用场景 |
+
+使用示例：
+```bash
+# 一键构建支持 RVV 1.0 的专属矢量交叉编译器
+./build.sh --target riscv64-linux-musl-rvv
+```
+
+---
+
+## 🐳 容器化构建 (Docker 100% 可重现)
+
+为了保证在任意 Linux 发行版（Ubuntu / Debian / Arch / Fedora / Alpine）甚至 macOS/Windows 上获得 100% 字节级一致的编译环境，项目根目录提供了标准化的 `Dockerfile` 与 `.dockerignore`：
+
+```bash
+# 1. 构建官方标准构建镜像
+docker build -t riscv-llvm-musl:latest .
+
+# 2. 挂载当前目录进行构建 (产物输出到本地 install-clang-musl 目录)
+docker run --rm -v "$(pwd):/workspace" riscv-llvm-musl:latest ./build.sh --default
+
+# 3. 运行特定步骤或变体构建
+docker run --rm -v "$(pwd):/workspace" riscv-llvm-musl:latest ./build.sh --target riscv64-linux-musl-rvv
+```
+
+---
+
 ## 📂 仓库结构
 
 ```text
 riscv-llvm-musl-toolchain/
 ├── build.sh                      # 【主入口】参数解析、环境加载、流水线编排调度
+├── Dockerfile                    # 【容器化】标准化 100% 可重现构建环境镜像配置
+├── .dockerignore                 # Docker 构建上下文忽略文件
 │
 ├── config/                       # 【配置层】纯声明式环境与目标配置
-│   ├── default.env               # 全局通用配置（版本、依赖 URL、编译线程）
+│   ├── default.env               # 全局通用配置（版本、依赖 URL、自适应并发、ccache 开关）
 │   ├── local.env.example         # 用户本地配置模板（可自由覆盖变量且被 Git 忽略）
 │   └── targets/                  # 目标平台配置目录
-│       └── riscv64-linux-musl.env# RISC-V 64 Musl 专属平台参数
+│       ├── riscv64-linux-musl.env    # RISC-V 64 Musl 标准平台配置
+│       ├── riscv64-linux-musl-rvv.env# RISC-V 64 RVV 1.0 矢量扩展配置
+│       └── riscv32-linux-musl.env    # RISC-V 32 Musl 目标平台配置
 │
 ├── third_party/                  # 【第三方源码组件（Git Submodule 管理）】
 │   ├── llvm/                     # LLVM 项目源码 (@ release/23.x，内含 compiler-rt 与 MLIR)
@@ -274,14 +375,14 @@ riscv-llvm-musl-toolchain/
 │   └── linux-headers/            # Linux 内核 UAPI 头文件 (@ master / sabotage-linux)
 │
 ├── scripts/                      # 【执行层】模块化独立步骤流水线
-│   ├── common.sh                 # 公共基础设施（日志、时间戳打标、断点续传下载、工具探测）
-│   ├── bootstrap.sh              # 阶段 1：智能探测本地编译工具链（本地优先免外网下载）
+│   ├── common.sh                 # 公共基础设施（RAM 感知并发计算、日志、断点续传下载）
+│   ├── bootstrap.sh              # 阶段 1：智能探测本地工具（含 ccache、cmake、ninja、clang）
 │   ├── fetch.sh                  # 阶段 2：准备源码 (Submodule 更新或挂载本地源码) 并自动应用补丁
-│   ├── llvm.sh                   # 阶段 3：用宿主编译器全量构建 LLVM 核心交叉编译器本体 (clang/lld)
-│   ├── runtimes.sh               # 阶段 4：用新 Clang 编译全套目标运行时 (libc.a/builtins/crt/libunwind/libc++)
+│   ├── llvm.sh                   # 阶段 3：全量构建 LLVM 核心交叉编译器本体 (支持 ccache)
+│   ├── runtimes.sh               # 阶段 4：解耦编译全套目标运行时 (支持 step_musl, step_compiler_rt, step_libcxx)
 │   ├── torch_mlir.sh             # 扩展阶段：配置并构建 torch-mlir 插件组件 (torch-mlir-opt)
 │   ├── prune.sh                  # 阶段 5：精简裁剪、Strip、三元组软链接与生成 .cfg 配置文件
-│   ├── verify.sh                 # 阶段 6：构建产物自愈检查与 C/C++ 纯静态冒烟测试
+│   ├── verify.sh                 # 阶段 6：构建产物自愈检查与 C/C++/RVV 矢量冒烟测试
 │   └── package.sh                # 阶段 7：打包发布 (tar.zst) 与计算 SHA256 校验和
 │
 ├── patches/                      # 【拓展层】组件补丁目录（自动检测应用）

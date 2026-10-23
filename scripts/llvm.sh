@@ -48,6 +48,11 @@ step_llvm() {
     read -r -a extra_cmake_flags <<< "${LLVM_EXTRA_CMAKE_ARGS}"
   fi
 
+  local ccache_flag=()
+  if [ "${ENABLE_CCACHE:-AUTO}" != "OFF" ] && [ -x "$BOOT/bin/ccache" ]; then
+    ccache_flag=("-DLLVM_CCACHE_BUILD=ON")
+  fi
+
   log "配置 LLVM (子项目: $enable_projects, 后端架构: $targets_to_build, ToolchainOnly: $install_toolchain_only)"
 
   "$BOOT/bin/cmake" -G Ninja -S "$LLVM_DIR/llvm" -B "$BUILD" \
@@ -76,6 +81,7 @@ step_llvm() {
     -DCLANG_DEFAULT_UNWINDLIB=libunwind \
     -DCLANG_DEFAULT_CXX_STDLIB=libc++ \
     -DLLVM_PARALLEL_LINK_JOBS=1 \
+    "${ccache_flag[@]}" \
     "${extra_cmake_flags[@]}"
 
   log "编译 LLVM (-j$JOBS)"

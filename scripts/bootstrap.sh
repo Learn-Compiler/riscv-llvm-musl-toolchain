@@ -123,6 +123,22 @@ step_bootstrap() {
   done
   ok "宿主本地编译器与构建工具已接入引导环境"
 
+  # ---- 5. ccache (可选编译加速工具) ----
+  local sys_ccache
+  sys_ccache="$(find_system_binary ccache || true)"
+  if [ -n "$sys_ccache" ]; then
+    ln -sf "$sys_ccache" "$BOOT/bin/ccache"
+    ok "使用宿主本地 ccache ($("$sys_ccache" --version | head -1))"
+  elif [ "${ENABLE_CCACHE:-AUTO}" = "ON" ]; then
+    if [ ! -x "$BOOT/$CCACHE_TARBALL/ccache" ]; then
+      echo "  显式启用了 ccache 但宿主未安装，从网络下载 ccache ..."
+      fetch_file "$CCACHE_URL" "$BOOT/ccache.tar.xz"
+      tar -xf "$BOOT/ccache.tar.xz" -C "$BOOT"
+    fi
+    ln -sf "$BOOT/$CCACHE_TARBALL/ccache" "$BOOT/bin/ccache"
+    ok "下载引导 ccache $("$BOOT/bin/ccache" --version | head -1)"
+  fi
+
   mark bootstrap
 }
 

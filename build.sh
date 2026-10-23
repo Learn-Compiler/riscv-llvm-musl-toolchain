@@ -60,22 +60,26 @@ show_help() {
   ./build.sh --strict-versions          开启严格版本校验 (LLVM 与 torch-mlir 不匹配时报错中止)
 
 模块流水线与维护选项:
-  ./build.sh --step <步骤名>     单独执行某一特定步骤 (可多次指定，如 --step musl --step llvm)
+  ./build.sh --step <步骤名>     单独执行某一特定步骤 (可多次指定，如 --step musl --step compiler-rt)
   ./build.sh --from <步骤名>     从指定步骤开始向下连续执行
+  -j, --jobs <N>                 指定并行构建核心数 (默认 auto: 依据 CPU 与内存自适应计算)
+  --ccache                       强制启用 ccache 编译加速 (若宿主无则自动下载免 root 引导版本)
+  --no-ccache                    禁用 ccache 编译加速
   ./build.sh --rebuild-llvm      重新编译 LLVM 模块与运行库（二次开发常用）
   ./build.sh --fetch             仅准备自举工具并拉取源码
   ./build.sh --package           构建完成后打包生成 .tar.zst 离线发布包
   ./build.sh --clean             清理编译临时目录与时间戳（保留 .bootstrap）
   ./build.sh --clean-all         清理所有内容（包括 .bootstrap 引导工具）
   ./build.sh --target <目标名>   指定目标平台配置 (对应 config/targets/<目标名>.env)
-  JOBS=8 ./build.sh              指定并行构建核心数 (默认 6)
 
 可选步骤名列表:
   bootstrap   - 准备免 root 引导工具并探测宿主 C++
   fetch       - 拉取源码或挂载本地自研源码 (llvm, musl, torch-mlir)
   llvm        - 编译 LLVM 核心编译器工具 (clang/lld/llvm-ar 等)
-  runtimes    - 编译目标全套运行时 (libc.a / builtins / crtbegin / libunwind / libc++) 并合并静态库
-                (兼容别名: builtins, compiler-rt, musl 均自动路由至 runtimes)
+  musl        - 独立编译目标 C 运行库 Musl (libc.a) 并准备 Linux 头文件
+  compiler-rt - 独立编译目标编译器基础运行库 (builtins / crtbegin / crtend)
+  libc++      - 独立编译目标 C++ 运行时 (libunwind / libc++ / libc++abi)
+  runtimes    - 编排并编译目标端全套运行时 (musl -> compiler-rt -> libc++)
   torch-mlir  - 配置并构建 torch-mlir 组件 (可扩展插件阶段)
   prune       - 精简无用跨平台工具、剥离符号、生成三元组链接与 .cfg
   verify      - 工具链运行库检查与 C/C++ 冒烟测试
@@ -119,6 +123,8 @@ CLI_LLVM_SRC=""
 CLI_MUSL_SRC=""
 CLI_LINUX_HEADERS_REF=""
 CLI_LINUX_HEADERS_SRC=""
+CLI_JOBS=""
+CLI_ENABLE_CCACHE=""
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -302,6 +308,32 @@ while [ $# -gt 0 ]; do
       START_FROM="$2"
       shift 2
       ;;
+    -j)
+      [ -n "${2:-}" ] || die "-j 需要指定线程数"
+      CLI_JOBS="$2"
+      shift 2
+      ;;
+    --jobs)
+      [ -n "${2:-}" ] || die "--jobs 需要指定线程数"
+      CLI_JOBS="$2"
+      shift 2
+      ;;
+    --jobs=*)
+      CLI_JOBS="${1#*=}"
+      shift
+      ;;
+    -j*)
+      CLI_JOBS="${1#-j}"
+      shift
+      ;;
+    --ccache)
+      CLI_ENABLE_CCACHE="ON"
+      shift
+      ;;
+    --no-ccache)
+      CLI_ENABLE_CCACHE="OFF"
+      shift
+      ;;
     --target)
       [ -n "${2:-}" ] || die "--target 需要指定目标名称"
       TARGET="$2"
@@ -327,6 +359,8 @@ done
 
 # 初始化基础配置与目标平台
 init_config
+[ -n "$CLI_JOBS" ]                && JOBS="$CLI_JOBS"
+[ -n "$CLI_ENABLE_CCACHE" ]       && ENABLE_CCACHE="$CLI_ENABLE_CCACHE"
 [ -n "$CLI_BUILD_TYPE" ]          && BUILD_TYPE="$CLI_BUILD_TYPE"
 [ -n "$CLI_RUNTIMES_BUILD_TYPE" ] && RUNTIMES_BUILD_TYPE="$CLI_RUNTIMES_BUILD_TYPE"
 [ -n "$CLI_ASSERTIONS" ]          && ENABLE_ASSERTIONS="$CLI_ASSERTIONS"
@@ -479,14 +513,19 @@ run_step() {
     fetch)
       step_fetch
       ;;
-    builtins|compiler-rt|compiler_rt|musl)
-      warn "步骤 $step 已统一合并至 runtimes，自动调用 step_runtimes ..."
-      step_runtimes
-      ;;
     llvm)
       step_llvm
       ;;
-    runtimes|runtime|libcxx|libc++)
+    musl)
+      step_musl
+      ;;
+    builtins|compiler-rt|compiler_rt)
+      step_compiler_rt
+      ;;
+    libcxx|libc++|libunwind)
+      step_libcxx
+      ;;
+    runtimes|runtime)
       step_runtimes
       ;;
     torch-mlir|torch_mlir)
@@ -507,14 +546,31 @@ run_step() {
   esac
 }
 
-# 单独步骤执行模式（支持单个或按序指定多个步骤，如 --step musl --step llvm）
+# 单独步骤执行模式（支持单个或按序指定多个步骤，如 --step musl --step compiler-rt）
 if [ ${#SELECTED_STEPS[@]} -gt 0 ]; then
   for step in "${SELECTED_STEPS[@]}"; do
     case "$step" in
-      compiler-rt|compiler_rt|builtins|musl|runtimes)
+      musl)
+        unmark musl
+        unmark runtimes
+        ;;
+      compiler-rt|compiler_rt|builtins)
+        unmark compiler_rt
+        unmark builtins
+        unmark runtimes
+        ;;
+      libcxx|libc++|libunwind)
+        unmark libcxx
+        unmark libc++
+        unmark runtimes
+        ;;
+      runtimes|runtime)
         unmark runtimes
         unmark musl
+        unmark compiler_rt
         unmark builtins
+        unmark libcxx
+        unmark libc++
         ;;
       *)
         unmark "$step"
@@ -531,6 +587,11 @@ fi
 if [ "$REBUILD_LLVM" = 1 ]; then
   unmark llvm
   unmark runtimes
+  unmark musl
+  unmark compiler_rt
+  unmark builtins
+  unmark libcxx
+  unmark libc++
   unmark prune
   unmark verify
 fi
@@ -546,7 +607,7 @@ if [ "$ONLY_FETCH" = 1 ]; then
 fi
 
 should_run=0
-if [ "$START_FROM" = "compiler-rt" ] || [ "$START_FROM" = "compiler_rt" ] || [ "$START_FROM" = "builtins" ] || [ "$START_FROM" = "musl" ]; then
+if [ "$START_FROM" = "compiler-rt" ] || [ "$START_FROM" = "compiler_rt" ] || [ "$START_FROM" = "builtins" ] || [ "$START_FROM" = "musl" ] || [ "$START_FROM" = "libc++" ] || [ "$START_FROM" = "libcxx" ]; then
   START_FROM="runtimes"
 fi
 [ -z "$START_FROM" ] && should_run=1

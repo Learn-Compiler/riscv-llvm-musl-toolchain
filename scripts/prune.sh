@@ -83,6 +83,10 @@ step_prune() {
 -stdlib=libc++
 EOF
 
+  if [ -n "${TARGET_EXTRA_CFLAGS:-}" ]; then
+    echo "${TARGET_EXTRA_CFLAGS}" >> "$INSTALL/bin/${T}.cfg"
+  fi
+
   if [ "${DEFAULT_STATIC_LINK:-ON}" = "ON" ]; then
     echo "-static" >> "$INSTALL/bin/${T}.cfg"
   fi

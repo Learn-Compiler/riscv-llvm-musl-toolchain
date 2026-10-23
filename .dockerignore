@@ -1,0 +1,11 @@
+.git
+.bootstrap
+.build-stamps
+build-*
+install-*
+*.tar.zst
+*.tar.gz
+*.zip
+*.o
+*.a
+*.so
