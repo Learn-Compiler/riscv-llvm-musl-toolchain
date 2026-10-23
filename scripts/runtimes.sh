@@ -90,7 +90,7 @@ step_runtimes() {
     -DCMAKE_AR="$target_ar" \
     -DCMAKE_NM="$target_nm" \
     -DCMAKE_RANLIB="$target_ranlib" \
-    -DLLVM_ENABLE_RUNTIMES="compiler-rt;libunwind;libcxx;libcxxabi" \
+    -DLLVM_ENABLE_RUNTIMES="${LLVM_ENABLE_RUNTIMES:-compiler-rt;libunwind;libcxx;libcxxabi}" \
     -DCMAKE_C_COMPILER_TARGET="$T" \
     -DCMAKE_CXX_COMPILER_TARGET="$T" \
     -DCMAKE_ASM_COMPILER_TARGET="$T" \
@@ -132,25 +132,28 @@ step_runtimes() {
   local inst_res="$INSTALL/lib/clang/$clang_ver/lib/$T"
   mkdir -p "$inst_res"
 
-  for b in "$RUNTIMES_BUILD/compiler-rt/lib/linux/libclang_rt.builtins-riscv64.a" \
-           "$INSTALL/lib/linux/libclang_rt.builtins-riscv64.a" \
+  local builtin_name="${RT_BUILTIN_NAME:-libclang_rt.builtins-riscv64.a}"
+  for b in "$RUNTIMES_BUILD/compiler-rt/lib/linux/$builtin_name" \
+           "$INSTALL/lib/linux/$builtin_name" \
            "$INSTALL/lib/$T/libclang_rt.builtins.a"; do
     if [ -f "$b" ]; then
       cp -a "$b" "$inst_res/libclang_rt.builtins.a"
-      cp -a "$b" "$inst_res/libclang_rt.builtins-riscv64.a"
+      cp -a "$b" "$inst_res/$builtin_name"
       cp -a "$b" "$SYSROOT/usr/lib/libclang_rt.builtins.a"
       break
     fi
   done
 
+  local crt_begin="${RT_CRT_BEGIN:-clang_rt.crtbegin-riscv64.o}"
+  local crt_end="${RT_CRT_END:-clang_rt.crtend-riscv64.o}"
   for cdir in "$RUNTIMES_BUILD/compiler-rt/lib/linux" "$INSTALL/lib/linux"; do
-    if [ -f "$cdir/clang_rt.crtbegin-riscv64.o" ]; then
-      cp -a "$cdir/clang_rt.crtbegin-riscv64.o" "$inst_res/clang_rt.crtbegin.o"
-      cp -a "$cdir/clang_rt.crtend-riscv64.o"   "$inst_res/clang_rt.crtend.o"
-      cp -a "$cdir/clang_rt.crtbegin-riscv64.o" "$inst_res/crtbegin.o"
-      cp -a "$cdir/clang_rt.crtend-riscv64.o"   "$inst_res/crtend.o"
-      cp -a "$cdir/clang_rt.crtbegin-riscv64.o" "$SYSROOT/usr/lib/crtbegin.o" 2>/dev/null || true
-      cp -a "$cdir/clang_rt.crtend-riscv64.o"   "$SYSROOT/usr/lib/crtend.o" 2>/dev/null || true
+    if [ -f "$cdir/$crt_begin" ]; then
+      cp -a "$cdir/$crt_begin" "$inst_res/clang_rt.crtbegin.o"
+      cp -a "$cdir/$crt_end"   "$inst_res/clang_rt.crtend.o"
+      cp -a "$cdir/$crt_begin" "$inst_res/crtbegin.o"
+      cp -a "$cdir/$crt_end"   "$inst_res/crtend.o"
+      cp -a "$cdir/$crt_begin" "$SYSROOT/usr/lib/crtbegin.o" 2>/dev/null || true
+      cp -a "$cdir/$crt_end"   "$SYSROOT/usr/lib/crtend.o" 2>/dev/null || true
       break
     fi
   done

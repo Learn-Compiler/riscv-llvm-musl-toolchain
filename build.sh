@@ -9,6 +9,7 @@
 #   * 模块化架构：配置解耦、单步调试支持、方便芯片自研与二次开发拓展
 # ==============================================================================
 set -euo pipefail
+BUILD_START_TIME=$(date +%s)
 
 SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -52,7 +53,7 @@ show_help() {
   ./build.sh --no-assertions     显式关闭 LLVM 断言
   ./build.sh --strip             强制剥离宿主程序符号 (Strip)
   ./build.sh --no-strip          保留宿主程序与库调试符号
-  ./build.sh --llvm-version <REF>       指定 LLVM 版本/分支/Tag/Commit (默认: 2fc577681ca1 对齐 torch-mlir)
+  ./build.sh --llvm-version <REF>       指定 LLVM 版本/分支/Tag/Commit (默认: config/versions.lock)
   ./build.sh --torch-mlir-version <REF> 指定 torch-mlir 版本/分支/Tag/Commit
   ./build.sh --musl-version <REF>       指定 Musl 版本/分支/Tag/Commit (默认: v1.2.5)
   ./build.sh --linux-headers-version <REF> 指定 linux-headers 版本/分支/Tag (默认: master)
@@ -71,11 +72,10 @@ show_help() {
 
 可选步骤名列表:
   bootstrap   - 准备免 root 引导工具并探测宿主 C++
-  fetch       - 拉取源码或挂载本地自研源码 (llvm, musl)
-  builtins    - 编译 compiler-rt builtins 与 crt (亦支持别名 --step compiler-rt)
-  musl        - 编译 Musl libc 并安装至 Sysroot
+  fetch       - 拉取源码或挂载本地自研源码 (llvm, musl, torch-mlir)
   llvm        - 编译 LLVM 核心编译器工具 (clang/lld/llvm-ar 等)
   runtimes    - 编译目标全套运行时 (libc.a / builtins / crtbegin / libunwind / libc++) 并合并静态库
+                (兼容别名: builtins, compiler-rt, musl 均自动路由至 runtimes)
   torch-mlir  - 配置并构建 torch-mlir 组件 (可扩展插件阶段)
   prune       - 精简无用跨平台工具、剥离符号、生成三元组链接与 .cfg
   verify      - 工具链运行库检查与 C/C++ 冒烟测试
@@ -352,9 +352,9 @@ fi
 if [ "${CLI_ENABLE_TORCH_MLIR:-0}" = 1 ]; then
   ENABLE_TORCH_MLIR=1
 fi
-[ -n "${CLI_LLVM_REF:-}" ]       && LLVM_REF="$CLI_LLVM_REF" && LLVM_SHA="$CLI_LLVM_REF"
-[ -n "${CLI_TORCH_MLIR_REF:-}" ] && TORCH_MLIR_REF="$CLI_TORCH_MLIR_REF" && TORCH_MLIR_SHA="$CLI_TORCH_MLIR_REF"
-[ -n "${CLI_MUSL_REF:-}" ]       && MUSL_REF="$CLI_MUSL_REF" && MUSL_SHA="$CLI_MUSL_REF"
+[ -n "${CLI_LLVM_REF:-}" ]       && LLVM_REF="$CLI_LLVM_REF"
+[ -n "${CLI_TORCH_MLIR_REF:-}" ] && TORCH_MLIR_REF="$CLI_TORCH_MLIR_REF"
+[ -n "${CLI_MUSL_REF:-}" ]       && MUSL_REF="$CLI_MUSL_REF"
 [ -n "${CLI_LINUX_HEADERS_REF:-}" ] && LINUX_HEADERS_REF="$CLI_LINUX_HEADERS_REF"
 [ "${CLI_STRICT_VERSIONS:-0}" = 1 ] && STRICT_VERSIONS=1
 
@@ -510,8 +510,16 @@ run_step() {
 # 单独步骤执行模式（支持单个或按序指定多个步骤，如 --step musl --step llvm）
 if [ ${#SELECTED_STEPS[@]} -gt 0 ]; then
   for step in "${SELECTED_STEPS[@]}"; do
-    [ "$step" = "compiler-rt" ] || [ "$step" = "compiler_rt" ] && step="builtins"
-    unmark "$step"
+    case "$step" in
+      compiler-rt|compiler_rt|builtins|musl|runtimes)
+        unmark runtimes
+        unmark musl
+        unmark builtins
+        ;;
+      *)
+        unmark "$step"
+        ;;
+    esac
     log "单独执行步骤: $step"
     run_step "$step"
     ok "步骤 $step 执行完毕"
@@ -538,7 +546,9 @@ if [ "$ONLY_FETCH" = 1 ]; then
 fi
 
 should_run=0
-[ "$START_FROM" = "compiler-rt" ] || [ "$START_FROM" = "compiler_rt" ] && START_FROM="builtins"
+if [ "$START_FROM" = "compiler-rt" ] || [ "$START_FROM" = "compiler_rt" ] || [ "$START_FROM" = "builtins" ] || [ "$START_FROM" = "musl" ]; then
+  START_FROM="runtimes"
+fi
 [ -z "$START_FROM" ] && should_run=1
 
 for st in "${PIPELINE[@]}"; do
@@ -558,3 +568,7 @@ log "全部流程已顺利完成！"
 printf '工具链安装路径: %s\n' "$INSTALL"
 printf '三元组别名调用: %s/bin/%s-clang hello.c\n' "$INSTALL" "$T"
 printf '标准参数调用  : %s/bin/clang --target=%s --sysroot=%s hello.c\n' "$INSTALL" "$T" "$SYSROOT"
+
+BUILD_END_TIME=$(date +%s)
+ELAPSED=$((BUILD_END_TIME - BUILD_START_TIME))
+printf '总计构建耗时  : %d分 %d秒\n' "$((ELAPSED / 60))" "$((ELAPSED % 60))" 

@@ -124,7 +124,7 @@ flowchart TD
 
 # 4. 单步独立调试与维护
 ./build.sh --step llvm --debug           # 以调试模式单独重编 LLVM 模块
-./build.sh --step musl --release --share # 以 Release 模式单独为 musl 编译共享库 (.so)
+./build.sh --step runtimes --release --share # 以 Release 模式编译目标全套运行库并生成共享库 (.so)
 ./build.sh --step torch-mlir             # 单独编译 torch-mlir 组件
 ./build.sh --step verify                 # 单独运行产物校验与冒烟测试
 ./build.sh --rebuild-llvm --debug        # 重编 LLVM 及运行库并开启调试模式
@@ -230,7 +230,7 @@ gdb --args install-clang-musl/bin/riscv64-unknown-linux-musl-clang -O2 test.c
    git rebase upstream/release/23.x
    ```
    只需专注于解决纯代码层面的冲突，构建系统不受任何干扰。
-2. **更新脚本配置**：如需升级默认拉取的官方版本，只需在 `build.sh` 中修改 `LLVM_SHA` 变量为上游的目标 commit 哈希即可。
+2. **更新脚本配置**：如需升级默认拉取的官方版本，只需在 `config/versions.lock` 中修改 `LLVM_REF` 为上游的目标分支或版本标签（例如 `llvmorg-23.1.4` 或 `release/23.x`）即可，亦可在命令行直接传入 `./build.sh --llvm-version <REF>`。
 
 ---
 
@@ -279,8 +279,6 @@ riscv-llvm-musl-toolchain/
 │   ├── fetch.sh                  # 阶段 2：准备源码 (Submodule 更新或挂载本地源码) 并自动应用补丁
 │   ├── llvm.sh                   # 阶段 3：用宿主编译器全量构建 LLVM 核心交叉编译器本体 (clang/lld)
 │   ├── runtimes.sh               # 阶段 4：用新 Clang 编译全套目标运行时 (libc.a/builtins/crt/libunwind/libc++)
-│   ├── builtins.sh               # （辅助）独立编译 compiler-rt builtins
-│   ├── musl.sh                   # （辅助）独立编译 Musl libc
 │   ├── torch_mlir.sh             # 扩展阶段：配置并构建 torch-mlir 插件组件 (torch-mlir-opt)
 │   ├── prune.sh                  # 阶段 5：精简裁剪、Strip、三元组软链接与生成 .cfg 配置文件
 │   ├── verify.sh                 # 阶段 6：构建产物自愈检查与 C/C++ 纯静态冒烟测试
@@ -304,7 +302,7 @@ riscv-llvm-musl-toolchain/
 
 | 组件 | 仓库地址 (Upstream) | 固定版本 / 分支 / Commit | 选型与版本考量 |
 | :--- | :--- | :--- | :--- |
-| **LLVM** | [llvm/llvm-project](https://github.com/llvm/llvm-project.git) | `0d261d1c` (`release/23.x` / `llvmorg-23.1.3`) | **官方最新发布主版本**，对 RVV 1.0 矢量扩展、Zba/Zbb/Zbc/Zicbo* 位操作与最新指令集提供最前沿的调度模型与优化 Pass，内建包含最新 MLIR 与 compiler-rt。 |
-| **Musl libc** | [kraj/musl](https://github.com/kraj/musl.git) | `9fa28ece` (`v1.2.6` / `master`) | Khem Raj 维护的 OpenEmbedded/Yocto musl 核心仓库，针对 RISC-V 架构系统调用与浮点 ABI 进行了交叉编译增强，全 64 位 `time_t`，代码极度精简易于无 GCC 自举。 |
-| **torch-mlir** | [llvm/torch-mlir](https://github.com/llvm/torch-mlir.git) | `486a0be1` (`main`) | LLVM 官方 PyTorch 到 MLIR 前端编译器项目。作为 Git Submodule 纳入统一工程化管理，并支持通过 `--torch-mlir-src` 自由挂载本地开发分支。 |
+| **LLVM** | [llvm/llvm-project](https://github.com/llvm/llvm-project.git) | `llvmorg-23.1.4` (`release/23.x`) | **官方最新发布主版本**，对 RVV 1.0 矢量扩展、Zba/Zbb/Zbc/Zicbo* 位操作与最新指令集提供最前沿的调度模型与优化 Pass，内建包含最新 MLIR 与 compiler-rt。 |
+| **Musl libc** | [kraj/musl](https://github.com/kraj/musl.git) | `v1.2.5` | Khem Raj 维护的 OpenEmbedded/Yocto musl 核心仓库，针对 RISC-V 架构系统调用与浮点 ABI 进行了交叉编译增强，全 64 位 `time_t`，代码极度精简易于无 GCC 自举。 |
+| **torch-mlir** | [llvm/torch-mlir](https://github.com/llvm/torch-mlir.git) | `v20261001` (`main`) | LLVM 官方 PyTorch 到 MLIR 前端编译器项目。作为 Git Submodule 纳入统一工程化管理，并支持通过 `--torch-mlir-src` 自由挂载本地开发分支。 |
 | **linux-headers**| [sabotage-linux/kernel-headers](https://github.com/sabotage-linux/kernel-headers.git) | `master` (Git Submodule) | 面向 Musl libc 优化的轻量级 Linux 内核 UAPI 头文件仓库，专为 RISC-V 目标交叉编译适配，提供必要的系统调用与底层头文件。作为 Git Submodule 纳入 `third_party/linux-headers` 统一工程化管理。 |
