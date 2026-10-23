@@ -30,12 +30,17 @@ get_target_tools() {
 # 确保 build-runtimes CMake 配置就绪
 ensure_runtimes_configured() {
   local RUNTIMES_BUILD="${BUILD_RUNTIMES:-$SRC/build-runtimes}"
+  local opt_level="${RUNTIMES_OPT_LEVEL:--O2}"
   mkdir -p "$RUNTIMES_BUILD"
-  if [ -f "$RUNTIMES_BUILD/build.ninja" ]; then
+
+  local opt_stamp="$RUNTIMES_BUILD/.opt_level"
+  if [ -f "$RUNTIMES_BUILD/build.ninja" ] && [ -f "$opt_stamp" ] && [ "$(cat "$opt_stamp" 2>/dev/null)" = "$opt_level" ]; then
     return 0
   fi
+  rm -f "$RUNTIMES_BUILD/build.ninja" "$RUNTIMES_BUILD/CMakeCache.txt"
+  echo "$opt_level" > "$opt_stamp"
 
-  log "配置 LLVM 目标运行库 CMake (compiler-rt / libunwind / libcxx / libcxxabi)"
+  log "配置 LLVM 目标运行库 CMake (compiler-rt / libunwind / libcxx / libcxxabi) [优化级别: $opt_level]"
   get_target_tools
   rm -rf "$RUNTIMES_BUILD/include/c++/v1" "$INSTALL/include/c++/v1"
 
@@ -50,6 +55,11 @@ ensure_runtimes_configured() {
     -S "$LLVM_DIR/runtimes" \
     -B "$RUNTIMES_BUILD" \
     -DCMAKE_BUILD_TYPE="${RUNTIMES_BUILD_TYPE:-Release}" \
+    -DCMAKE_C_FLAGS_RELEASE="$opt_level -DNDEBUG" \
+    -DCMAKE_CXX_FLAGS_RELEASE="$opt_level -DNDEBUG" \
+    -DCMAKE_ASM_FLAGS_RELEASE="$opt_level" \
+    -DCMAKE_C_FLAGS_RELWITHDEBINFO="$opt_level -g -DNDEBUG" \
+    -DCMAKE_CXX_FLAGS_RELWITHDEBINFO="$opt_level -g -DNDEBUG" \
     -DCMAKE_INSTALL_PREFIX="$INSTALL" \
     -DCMAKE_C_COMPILER="$target_clang" \
     -DCMAKE_CXX_COMPILER="$target_clangxx" \
@@ -124,11 +134,13 @@ step_musl() {
     read -r -a musl_extra_flags <<< "${MUSL_EXTRA_ARGS}"
   fi
 
+  local musl_opt="${RUNTIMES_OPT_LEVEL:--O2}"
   local target_cflags="${TARGET_EXTRA_CFLAGS:-}"
 
   CC="$target_clang --target=$T $target_cflags -fuse-ld=lld" \
   AR="$target_ar" \
   RANLIB="$target_ranlib" \
+  CFLAGS="$musl_opt $target_cflags" \
   ./configure \
       --target="$MUSL_TARGET" \
       --prefix=/usr \
@@ -136,7 +148,8 @@ step_musl() {
       --disable-gcc-wrapper \
       --enable-static \
       "${musl_shared_flags[@]}" \
-      "${musl_extra_flags[@]}"
+      "${musl_extra_flags[@]}" \
+      CFLAGS="$musl_opt $target_cflags"
 
   make -j"$JOBS" AR="$target_ar" RANLIB="$target_ranlib"
   make DESTDIR="$SYSROOT" install

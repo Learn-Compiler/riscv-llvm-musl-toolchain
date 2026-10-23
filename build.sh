@@ -103,6 +103,7 @@ SELECTED_STEPS=()
 START_FROM=""
 CLI_BUILD_TYPE=""
 CLI_RUNTIMES_BUILD_TYPE=""
+CLI_RUNTIMES_OPT_LEVEL=""
 CLI_ASSERTIONS=""
 CLI_STRIP_SYMBOLS=""
 CLI_ENABLE_SHARED=""
@@ -184,6 +185,15 @@ while [ $# -gt 0 ]; do
     --runtimes-build-type)
       [ -n "${2:-}" ] || die "--runtimes-build-type 需要指定模式 (Release|RelWithDebInfo|Debug|MinSizeRel)"
       CLI_RUNTIMES_BUILD_TYPE="$2"
+      shift 2
+      ;;
+    --runtimes-opt|--runtimes-opt-level)
+      [ -n "${2:-}" ] || die "$1 需要指定优化级别 (如 \"-O2\" 或 \"-O3\")"
+      if [[ "$2" != -* ]]; then
+        CLI_RUNTIMES_OPT_LEVEL="-$2"
+      else
+        CLI_RUNTIMES_OPT_LEVEL="$2"
+      fi
       shift 2
       ;;
     --projects|--llvm-projects)
@@ -377,6 +387,7 @@ init_config
 [ -n "${CLI_INSTALL_AI:-}" ]        && INSTALL_AI="$CLI_INSTALL_AI"
 [ -n "$CLI_BUILD_TYPE" ]          && BUILD_TYPE="$CLI_BUILD_TYPE"
 [ -n "$CLI_RUNTIMES_BUILD_TYPE" ] && RUNTIMES_BUILD_TYPE="$CLI_RUNTIMES_BUILD_TYPE"
+[ -n "$CLI_RUNTIMES_OPT_LEVEL" ]   && RUNTIMES_OPT_LEVEL="$CLI_RUNTIMES_OPT_LEVEL"
 [ -n "$CLI_ASSERTIONS" ]          && ENABLE_ASSERTIONS="$CLI_ASSERTIONS"
 [ -n "$CLI_STRIP_SYMBOLS" ]       && STRIP_SYMBOLS="$CLI_STRIP_SYMBOLS"
 [ -n "$CLI_ENABLE_SHARED" ]       && ENABLE_SHARED="$CLI_ENABLE_SHARED"
@@ -492,7 +503,7 @@ command -v curl >/dev/null || die "缺少 curl"
 command -v tar  >/dev/null || die "缺少 tar"
 
 printf '%s%s 无 GCC 工具链构建%s\n' "$c_hd" "$TARGET_TRIPLE" "$c_off"
-printf '  SRC     = %s\n  INSTALL = %s\n  JOBS    = %s\n  BUILD   = %s (Runtimes: %s, Assertions: %s, Strip: %s, Shared: %s, DefaultStatic: %s)\n' "$SRC" "$INSTALL" "$JOBS" "$BUILD_TYPE" "$RUNTIMES_BUILD_TYPE" "$ENABLE_ASSERTIONS" "$STRIP_SYMBOLS" "$ENABLE_SHARED" "$DEFAULT_STATIC_LINK"
+printf '  SRC     = %s\n  INSTALL = %s\n  JOBS    = %s\n  BUILD   = %s (Runtimes: %s [%s], Assertions: %s, Strip: %s, Shared: %s, DefaultStatic: %s)\n' "$SRC" "$INSTALL" "$JOBS" "$BUILD_TYPE" "$RUNTIMES_BUILD_TYPE" "${RUNTIMES_OPT_LEVEL:--O2}" "$ENABLE_ASSERTIONS" "$STRIP_SYMBOLS" "$ENABLE_SHARED" "$DEFAULT_STATIC_LINK"
 printf '  PROJECTS= %s\n  TARGETS = %s\n' "${LLVM_ENABLE_PROJECTS:-clang;lld}" "${LLVM_TARGETS_TO_BUILD:-$LLVM_TARGET_ARCH}"
 printf '  VERSIONS= LLVM:%s | torch-mlir:%s | musl:%s | linux-headers:%s\n' "${LLVM_REF:-default}" "${TORCH_MLIR_REF:-default}" "${MUSL_REF:-default}" "${LINUX_HEADERS_REF:-default}"
 [ -n "${LLVM_EXTRA_CMAKE_ARGS:-}" ] && printf '  CMAKE_EXTRA = %s\n' "$LLVM_EXTRA_CMAKE_ARGS"
