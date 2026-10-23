@@ -1,20 +1,20 @@
 [submodule "llvm"]
 	path = third_party/llvm
-	url = https://github.com/llvm/llvm-project.git
+	url = git@github.com:Learn-Compiler/llvm-project.git
 	branch = release/23.x
 	shallow = true
 [submodule "musl"]
 	path = third_party/musl
-	url = https://github.com/kraj/musl.git
+	url = git@github.com:kraj/musl.git
 	branch = master
 	shallow = true
 [submodule "torch-mlir"]
 	path = third_party/torch-mlir
-	url = https://github.com/llvm/torch-mlir.git
+	url = git@github.com:Learn-Compiler/torch-mlir.git
 	branch = main
 	shallow = true
 [submodule "linux-headers"]
 	path = third_party/linux-headers
-	url = https://github.com/sabotage-linux/kernel-headers.git
+	url = git@github.com:sabotage-linux/kernel-headers.git
 	branch = master
 	shallow = true
