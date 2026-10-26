@@ -167,6 +167,7 @@ init_config() {
   esac
   local target_conf="$SRC/config/targets/${TARGET}.env"
   if [ -f "$target_conf" ]; then
+    unset TARGET_TRIPLE T LLVM_TARGET_ARCH MUSL_TARGET RT_BUILTIN_NAME RT_CRT_BEGIN RT_CRT_END LD_MUSL_SO SMOKE_TEST_PATTERN PACKAGE_NAME TARGET_EXTRA_CFLAGS
     # shellcheck disable=SC1091
     source "$target_conf"
   else
