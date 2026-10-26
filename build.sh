@@ -395,13 +395,13 @@ while [ $# -gt 0 ]; do
       ;;
     --clean)
       log "清理构建缓存与时间戳 ..."
-      rm -rf "$STAMPS" "$BUILD" "$SRC/build-compiler-rt" "$SRC/build-runtimes" "$SRC/build-torch-mlir" "${INSTALL_TOOLCHAIN:-$INSTALL}" "${INSTALL_AI:-$SRC/install-ai}" "$SRC/install-clang-musl" "$SRC/env.sh" "$SHIM"
+      rm -rf "$STAMPS" "$BUILD" "$SRC/build-compiler-rt" "$SRC/build-runtimes" "$SRC/build-runtimes-riscv32" "$SRC/build-torch-mlir" "${INSTALL_TOOLCHAIN:-$INSTALL}" "${INSTALL_AI:-$SRC/install-ai}" "$SRC/install-clang-musl" "$SRC/env.sh" "$SHIM"
       ok "清理完成"
       exit 0
       ;;
     --clean-all)
       log "完全清理构建缓存与引导环境 ..."
-      rm -rf "$STAMPS" "$BUILD" "$SRC/build-compiler-rt" "$SRC/build-runtimes" "$SRC/build-torch-mlir" "${INSTALL_TOOLCHAIN:-$INSTALL}" "${INSTALL_AI:-$SRC/install-ai}" "$SRC/install-clang-musl" "$SRC/env.sh" "$SHIM" "$BOOT"
+      rm -rf "$STAMPS" "$BUILD" "$SRC/build-compiler-rt" "$SRC/build-runtimes" "$SRC/build-runtimes-riscv32" "$SRC/build-torch-mlir" "${INSTALL_TOOLCHAIN:-$INSTALL}" "${INSTALL_AI:-$SRC/install-ai}" "$SRC/install-clang-musl" "$SRC/env.sh" "$SHIM" "$BOOT"
       ok "全部清理完成"
       exit 0
       ;;

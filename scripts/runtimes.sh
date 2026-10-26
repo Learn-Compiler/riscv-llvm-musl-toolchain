@@ -32,14 +32,16 @@ ensure_runtimes_configured() {
   local RUNTIMES_BUILD="${BUILD_RUNTIMES:-$SRC/build-runtimes}"
   local opt_level="${RUNTIMES_OPT_LEVEL:-default}"
   mkdir -p "$RUNTIMES_BUILD"
-  local opt_stamp="$RUNTIMES_BUILD/.opt_level"
-  if [ -f "$RUNTIMES_BUILD/build.ninja" ] && [ -f "$opt_stamp" ] && [ "$(cat "$opt_stamp" 2>/dev/null)" = "$opt_level" ]; then
+  local target_cflags="${TARGET_EXTRA_CFLAGS:-}"
+  local cfg_stamp="$RUNTIMES_BUILD/.configured_state"
+  local current_cfg_state="${TARGET}|${T}|${SYSROOT}|${opt_level}|${target_cflags}"
+  if [ -f "$RUNTIMES_BUILD/build.ninja" ] && [ -f "$cfg_stamp" ] && [ "$(cat "$cfg_stamp" 2>/dev/null)" = "$current_cfg_state" ]; then
     return 0
   fi
   rm -f "$RUNTIMES_BUILD/build.ninja" "$RUNTIMES_BUILD/CMakeCache.txt"
-  echo "$opt_level" > "$opt_stamp"
+  echo "$current_cfg_state" > "$cfg_stamp"
 
-  log "配置 LLVM 目标运行库 CMake (compiler-rt / libunwind / libcxx / libcxxabi) [优化级别: $opt_level]"
+  log "配置 LLVM 目标运行库 CMake (compiler-rt / libunwind / libcxx / libcxxabi) [Target: $T, Sysroot: $SYSROOT, 优化级别: $opt_level]"
   get_target_tools
   rm -rf "$RUNTIMES_BUILD/include/c++/v1" "$INSTALL/include/c++/v1"
 
