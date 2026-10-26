@@ -123,7 +123,7 @@ EOF
   fi
 
   # --- 冒烟测试：RISC-V Vector 1.0 (RVV，若配置开启) ---
-  if [[ "${TARGET_EXTRA_CFLAGS:-}" == *"v"* ]]; then
+  if [[ "${TARGET_EXTRA_CFLAGS:-}" =~ (rv[36][24][a-z]*v|\+v|zve) ]]; then
     cat > "$wd/vec.c" <<'EOF'
 #include <stdio.h>
 #include <riscv_vector.h>
