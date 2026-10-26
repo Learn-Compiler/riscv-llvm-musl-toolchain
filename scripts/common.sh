@@ -179,10 +179,10 @@ init_config() {
   INSTALL="${INSTALL_TOOLCHAIN}"
   if [ -z "${CLI_SYSROOT:-}" ] && [ -z "${SYSROOT_OVERRIDDEN:-}" ]; then
     if [ "$TARGET" = "riscv32-linux-musl" ]; then
-      # 若主 sysroot 已存在且为 64 位 libc，则 rv32 运行时独立安装至 sysroot32
-      if [ -f "$INSTALL/sysroot/usr/lib/libc.a" ] && file "$INSTALL/sysroot/usr/lib/libc.a" 2>/dev/null | grep -q "ELF 64-bit"; then
+      # 若主 sysroot 已存在且为 64 位目标，则 rv32 运行时独立安装至 sysroot32
+      if [ -f "$INSTALL/sysroot/usr/lib/crt1.o" ] && file "$INSTALL/sysroot/usr/lib/crt1.o" 2>/dev/null | grep -q "64-bit"; then
         SYSROOT="$INSTALL/sysroot32"
-      elif [ -d "$INSTALL/sysroot32" ] && [ ! -d "$INSTALL/sysroot" ]; then
+      elif [ -d "$INSTALL/sysroot32" ] && [ ! -L "$INSTALL/sysroot32" ]; then
         SYSROOT="$INSTALL/sysroot32"
       else
         SYSROOT="$INSTALL/sysroot"

@@ -565,8 +565,11 @@ source "$SRC/scripts/package.sh"
 step_musl_rv32() {
   local saved_t="$TARGET" saved_sysroot="${SYSROOT:-}" saved_br="${BUILD_RUNTIMES:-}"
   TARGET="riscv32-linux-musl"
-  unset SYSROOT BUILD_RUNTIMES TARGET_EXTRA_CFLAGS
+  SYSROOT="${INSTALL}/sysroot32"
+  BUILD_RUNTIMES="$SRC/build-runtimes-riscv32"
+  unset TARGET_EXTRA_CFLAGS
   init_config
+  SYSROOT="${INSTALL}/sysroot32"
   step_musl
   TARGET="$saved_t"
   unset TARGET_EXTRA_CFLAGS
@@ -578,8 +581,11 @@ step_musl_rv32() {
 step_compiler_rt_rv32() {
   local saved_t="$TARGET" saved_sysroot="${SYSROOT:-}" saved_br="${BUILD_RUNTIMES:-}"
   TARGET="riscv32-linux-musl"
-  unset SYSROOT BUILD_RUNTIMES TARGET_EXTRA_CFLAGS
+  SYSROOT="${INSTALL}/sysroot32"
+  BUILD_RUNTIMES="$SRC/build-runtimes-riscv32"
+  unset TARGET_EXTRA_CFLAGS
   init_config
+  SYSROOT="${INSTALL}/sysroot32"
   step_compiler_rt
   TARGET="$saved_t"
   unset TARGET_EXTRA_CFLAGS
@@ -591,8 +597,11 @@ step_compiler_rt_rv32() {
 step_libcxx_rv32() {
   local saved_t="$TARGET" saved_sysroot="${SYSROOT:-}" saved_br="${BUILD_RUNTIMES:-}"
   TARGET="riscv32-linux-musl"
-  unset SYSROOT BUILD_RUNTIMES TARGET_EXTRA_CFLAGS
+  SYSROOT="${INSTALL}/sysroot32"
+  BUILD_RUNTIMES="$SRC/build-runtimes-riscv32"
+  unset TARGET_EXTRA_CFLAGS
   init_config
+  SYSROOT="${INSTALL}/sysroot32"
   step_libcxx
   TARGET="$saved_t"
   unset TARGET_EXTRA_CFLAGS
@@ -605,8 +614,11 @@ step_runtimes_rv32() {
   log "构建 RISC-V 32 目标运行库全集 (riscv32-unknown-linux-musl: musl -> compiler-rt -> libc++)"
   local saved_t="$TARGET" saved_sysroot="${SYSROOT:-}" saved_br="${BUILD_RUNTIMES:-}"
   TARGET="riscv32-linux-musl"
-  unset SYSROOT BUILD_RUNTIMES TARGET_EXTRA_CFLAGS
+  SYSROOT="${INSTALL}/sysroot32"
+  BUILD_RUNTIMES="$SRC/build-runtimes-riscv32"
+  unset TARGET_EXTRA_CFLAGS
   init_config
+  SYSROOT="${INSTALL}/sysroot32"
   step_runtimes
   TARGET="$saved_t"
   unset TARGET_EXTRA_CFLAGS
@@ -620,8 +632,11 @@ step_verify_rv32() {
   log "验证 RISC-V 32 工具链运行库与冒烟测试"
   local saved_t="$TARGET" saved_sysroot="${SYSROOT:-}" saved_br="${BUILD_RUNTIMES:-}"
   TARGET="riscv32-linux-musl"
-  unset SYSROOT BUILD_RUNTIMES TARGET_EXTRA_CFLAGS
+  SYSROOT="${INSTALL}/sysroot32"
+  BUILD_RUNTIMES="$SRC/build-runtimes-riscv32"
+  unset TARGET_EXTRA_CFLAGS
   init_config
+  SYSROOT="${INSTALL}/sysroot32"
   step_verify
   TARGET="$saved_t"
   unset TARGET_EXTRA_CFLAGS

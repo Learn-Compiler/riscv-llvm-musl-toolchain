@@ -172,9 +172,6 @@ step_musl() {
   if [ "$(basename "$SYSROOT")" = "sysroot32" ]; then
     ln -sfn sysroot32 "$INSTALL/sysroot-riscv32"
   fi
-  if [ "$TARGET" = "riscv32-linux-musl" ] && [ "$(basename "$SYSROOT")" = "sysroot" ]; then
-    ln -sfn sysroot "$INSTALL/sysroot32"
-  fi
 
   mark musl
   ok "目标 C 运行库 (libc.a) 编译并安装就绪"
