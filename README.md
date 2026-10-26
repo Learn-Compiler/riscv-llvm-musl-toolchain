@@ -111,10 +111,12 @@ flowchart TD
 ./build.sh --static            # 显式指定仅构建目标静态库 (.a)（默认行为）
 ./build.sh --no-static-link    # 静态库模式下不默认向 .cfg 追加 -static (亦支持 --no-default-static)
 
-# 3. 目标架构变体 (Target Variants)
+# 3. 目标架构变体与多架构支持 (Target Variants & Multilib)
 ./build.sh --target riscv64-linux-musl     # 默认标准 RISC-V 64 (rv64gc / lp64d)
 ./build.sh --target riscv64-linux-musl-rvv # 启用 RVV 1.0 矢量扩展 (rv64gcv / lp64d，内置 .cfg 自动装载)
-./build.sh --target riscv32-linux-musl     # 切换至 RISC-V 32 Musl 目标平台
+./build.sh --target riscv32-linux-musl     # 切换至 RISC-V 32 Musl 目标平台 (亦支持 --riscv32 / --rv32)
+./build.sh --riscv32                       # 快捷指定编译纯 32 位工具链 (riscv32-unknown-linux-musl)
+./build.sh --multilib-rv32                 # 双架构模式：构建 64 位工具链同时追加编译 32 位完整运行库
 
 # 4. 并发任务调度与 ccache 编译加速
 ./build.sh -j 16               # 手动指定并行线程数 (默认 auto: 依据 CPU 与物理内存自适应计算防 OOM)
@@ -126,6 +128,7 @@ flowchart TD
 ./build.sh --step compiler-rt  # 仅独立编译目标编译器核心库 (libclang_rt.builtins.a / crtbegin.o)
 ./build.sh --step libc++       # 仅独立编译目标 C++ 运行时 (libc++.a / libunwind.a 并自动融合 ABI)
 ./build.sh --step runtimes     # 编排全套目标运行时流水线 (musl -> compiler-rt -> libc++)
+./build.sh --step runtimes-rv32 # 独立为已有工具链增量构建 32 位全套运行时并生成双架构配置入口
 
 # 6. 灵活定制子项目、MLIR 与编译参数 (支持 torch-mlir 扩展)
 ./build.sh --enable-mlir                       # 启用 MLIR 子项目构建 (clang;lld;mlir)
