@@ -619,7 +619,10 @@ step_runtimes_rv32() {
   unset TARGET_EXTRA_CFLAGS
   init_config
   SYSROOT="${INSTALL}/sysroot32"
-  step_runtimes
+  step_musl
+  step_compiler_rt
+  step_libcxx
+  mark runtimes
   TARGET="$saved_t"
   unset TARGET_EXTRA_CFLAGS
   [ -n "$saved_sysroot" ] && SYSROOT="$saved_sysroot"
@@ -744,24 +747,24 @@ if [ ${#SELECTED_STEPS[@]} -gt 0 ]; then
         unmark libc++
         ;;
       musl-rv32|musl32)
-        TARGET="riscv32-linux-musl" init_config
+        TARGET="riscv32-linux-musl"; init_config
         unmark musl
         unmark runtimes
         ;;
       compiler-rt-rv32|compiler_rt-rv32|builtins-rv32|compiler-rt32)
-        TARGET="riscv32-linux-musl" init_config
+        TARGET="riscv32-linux-musl"; init_config
         unmark compiler_rt
         unmark builtins
         unmark runtimes
         ;;
       libcxx-rv32|libc++-rv32|libunwind-rv32|libcxx32)
-        TARGET="riscv32-linux-musl" init_config
+        TARGET="riscv32-linux-musl"; init_config
         unmark libcxx
         unmark libc++
         unmark runtimes
         ;;
       runtimes-rv32|runtimes32|runtime-rv32|runtime32)
-        TARGET="riscv32-linux-musl" init_config
+        TARGET="riscv32-linux-musl"; init_config
         unmark runtimes
         unmark musl
         unmark compiler_rt
@@ -770,7 +773,7 @@ if [ ${#SELECTED_STEPS[@]} -gt 0 ]; then
         unmark libc++
         ;;
       verify-rv32|verify32)
-        TARGET="riscv32-linux-musl" init_config
+        TARGET="riscv32-linux-musl"; init_config
         unmark verify
         ;;
       *)
