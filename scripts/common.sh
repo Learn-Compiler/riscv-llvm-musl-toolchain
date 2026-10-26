@@ -46,9 +46,42 @@ warn() { printf '%s  ! %s%s\n' "$c_warn" "$*" "$c_off"; }
 die()  { printf '\n%s!! %s%s\n' "$c_er" "$*" "$c_off" >&2; exit 1; }
 
 # ─── 幂等时间戳状态机 ────────────────────────────────────────────────────
-is_done() { [ -f "$STAMPS/$1" ]; }
-mark()    { mkdir -p "$STAMPS"; date '+%F %T' > "$STAMPS/$1"; }
-unmark()  { rm -f "$STAMPS/$1"; }
+is_done() {
+  local name="$1"
+  case "$name" in
+    musl|compiler_rt|builtins|libcxx|libc++|runtimes|verify|package)
+      [ -f "$STAMPS/${name}_${TARGET:-default}" ] || [ -f "$STAMPS/${TARGET:-default}/$name" ]
+      ;;
+    *)
+      [ -f "$STAMPS/$name" ]
+      ;;
+  esac
+}
+mark() {
+  local name="$1"
+  mkdir -p "$STAMPS"
+  case "$name" in
+    musl|compiler_rt|builtins|libcxx|libc++|runtimes|verify|package)
+      mkdir -p "$STAMPS/${TARGET:-default}"
+      date '+%F %T' > "$STAMPS/${name}_${TARGET:-default}"
+      date '+%F %T' > "$STAMPS/${TARGET:-default}/$name"
+      ;;
+    *)
+      date '+%F %T' > "$STAMPS/$name"
+      ;;
+  esac
+}
+unmark() {
+  local name="$1"
+  case "$name" in
+    musl|compiler_rt|builtins|libcxx|libc++|runtimes|verify|package)
+      rm -f "$STAMPS/${name}_${TARGET:-default}" "$STAMPS/${TARGET:-default}/$name" "$STAMPS/$name"
+      ;;
+    *)
+      rm -f "$STAMPS/$name"
+      ;;
+  esac
+}
 
 # ─── 断点续传下载器 ──────────────────────────────────────────────────────
 # GitHub release 资源带 accept-ranges: bytes，可用 -C - 续传。
@@ -119,14 +152,53 @@ init_config() {
     source "$SRC/config/local.env"
   fi
 
-  # 4. 载入目标平台配置
+  # 4. 载入目标平台配置 (支持标准化与常用别名转换)
   TARGET="${TARGET:-riscv64-linux-musl}"
+  case "$TARGET" in
+    riscv32|rv32|riscv32-linux-musl|riscv32-unknown-linux-musl)
+      TARGET="riscv32-linux-musl"
+      ;;
+    riscv64|rv64|riscv64-linux-musl|riscv64-unknown-linux-musl)
+      TARGET="riscv64-linux-musl"
+      ;;
+    riscv64-rvv|rv64-rvv|riscv64-linux-musl-rvv)
+      TARGET="riscv64-linux-musl-rvv"
+      ;;
+  esac
   local target_conf="$SRC/config/targets/${TARGET}.env"
   if [ -f "$target_conf" ]; then
     # shellcheck disable=SC1091
     source "$target_conf"
   else
     die "找不到目标平台配置文件: $target_conf"
+  fi
+
+  # 目标平台特定的 Sysroot 与 build-runtimes 目录自适应推导
+  INSTALL_TOOLCHAIN="${INSTALL_TOOLCHAIN:-${INSTALL:-$SRC/install-toolchain}}"
+  INSTALL="${INSTALL_TOOLCHAIN}"
+  if [ -z "${CLI_SYSROOT:-}" ] && [ -z "${SYSROOT_OVERRIDDEN:-}" ]; then
+    if [ "$TARGET" = "riscv32-linux-musl" ]; then
+      # 若主 sysroot 已存在且为 64 位 libc，则 rv32 运行时独立安装至 sysroot32
+      if [ -f "$INSTALL/sysroot/usr/lib/libc.a" ] && file "$INSTALL/sysroot/usr/lib/libc.a" 2>/dev/null | grep -q "ELF 64-bit"; then
+        SYSROOT="$INSTALL/sysroot32"
+      elif [ -d "$INSTALL/sysroot32" ] && [ ! -d "$INSTALL/sysroot" ]; then
+        SYSROOT="$INSTALL/sysroot32"
+      else
+        SYSROOT="$INSTALL/sysroot"
+      fi
+    else
+      SYSROOT="$INSTALL/sysroot"
+    fi
+  elif [ -n "${CLI_SYSROOT:-}" ]; then
+    SYSROOT="$CLI_SYSROOT"
+  fi
+
+  if [ -z "${BUILD_RUNTIMES_OVERRIDDEN:-}" ]; then
+    if [ "$TARGET" = "riscv32-linux-musl" ]; then
+      BUILD_RUNTIMES="$SRC/build-runtimes-riscv32"
+    else
+      BUILD_RUNTIMES="$SRC/build-runtimes"
+    fi
   fi
 
   # 5. 载入已探测持久化的宿主编译器编译参数（若已探测）

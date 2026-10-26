@@ -85,6 +85,11 @@ EOF
       "$wd/hello.c" -o "$wd/hello"
   file "$wd/hello" | grep -q "${SMOKE_TEST_PATTERN:-RISC-V}" \
     || die "C 冒烟测试产物不是目标架构 (${SMOKE_TEST_PATTERN:-RISC-V})"
+  if [ "$T" = "riscv32-unknown-linux-musl" ]; then
+    file "$wd/hello" | grep -q "32-bit" || die "C 冒烟测试产物不是 32 位 ELF"
+  elif [ "$T" = "riscv64-unknown-linux-musl" ]; then
+    file "$wd/hello" | grep -q "64-bit" || die "C 冒烟测试产物不是 64 位 ELF"
+  fi
   if [ -n "$c_static_flag" ]; then
     file "$wd/hello" | grep -q "statically linked" \
       || die "C 冒烟测试产物不是静态链接"
@@ -104,6 +109,11 @@ EOF
       "$wd/h.cpp" -o "$wd/h"
   file "$wd/h" | grep -q "${SMOKE_TEST_PATTERN:-RISC-V}" \
     || die "C++ 冒烟测试产物不是目标架构 (${SMOKE_TEST_PATTERN:-RISC-V})"
+  if [ "$T" = "riscv32-unknown-linux-musl" ]; then
+    file "$wd/h" | grep -q "32-bit" || die "C++ 冒烟测试产物不是 32 位 ELF"
+  elif [ "$T" = "riscv64-unknown-linux-musl" ]; then
+    file "$wd/h" | grep -q "64-bit" || die "C++ 冒烟测试产物不是 64 位 ELF"
+  fi
   if [ -n "$c_static_flag" ]; then
     file "$wd/h" | grep -q "statically linked" \
       || die "C++ 冒烟测试产物不是静态链接"
@@ -131,26 +141,48 @@ EOF
   fi
 
   # --- 冒烟测试：直接调用 clang / clang++ 免参数编译 (自动装载 clang.cfg) ---
-  "$INSTALL/bin/clang" "$wd/hello.c" -o "$wd/hello-cfg"
-  file "$wd/hello-cfg" | grep -q "${SMOKE_TEST_PATTERN:-UCB RISC-V}" \
-    || die "直接调用 clang 编译测试失败"
-  if [ "${DEFAULT_STATIC_LINK:-ON}" = "ON" ]; then
-    file "$wd/hello-cfg" | grep -q "statically linked" \
-      || die "直接调用 clang 未默认静态链接"
-    ok "直接调用 clang (clang.cfg 自动装载) 默认静态链接成功"
-  else
-    ok "直接调用 clang (clang.cfg 自动装载) 编译成功"
+  if [ -f "$INSTALL/bin/clang.cfg" ] && grep -q -- "--target=${T}" "$INSTALL/bin/clang.cfg"; then
+    "$INSTALL/bin/clang" "$wd/hello.c" -o "$wd/hello-cfg"
+    file "$wd/hello-cfg" | grep -q "${SMOKE_TEST_PATTERN:-RISC-V}" \
+      || die "直接调用 clang 编译测试失败"
+    if [ "${DEFAULT_STATIC_LINK:-ON}" = "ON" ]; then
+      file "$wd/hello-cfg" | grep -q "statically linked" \
+        || die "直接调用 clang 未默认静态链接"
+      ok "直接调用 clang (clang.cfg 自动装载) 默认静态链接成功"
+    else
+      ok "直接调用 clang (clang.cfg 自动装载) 编译成功"
+    fi
+
+    "$INSTALL/bin/clang++" "$wd/h.cpp" -o "$wd/h-cfg"
+    file "$wd/h-cfg" | grep -q "${SMOKE_TEST_PATTERN:-RISC-V}" \
+      || die "直接调用 clang++ 编译测试失败"
+    if [ "${DEFAULT_STATIC_LINK:-ON}" = "ON" ]; then
+      file "$wd/h-cfg" | grep -q "statically linked" \
+        || die "直接调用 clang++ 未默认静态链接"
+      ok "直接调用 clang++ (clang++.cfg 自动装载) 默认静态链接成功"
+    else
+      ok "直接调用 clang++ (clang++.cfg 自动装载) 编译成功"
+    fi
   fi
 
-  "$INSTALL/bin/clang++" "$wd/h.cpp" -o "$wd/h-cfg"
-  file "$wd/h-cfg" | grep -q "${SMOKE_TEST_PATTERN:-UCB RISC-V}" \
-    || die "直接调用 clang++ 编译测试失败"
-  if [ "${DEFAULT_STATIC_LINK:-ON}" = "ON" ]; then
-    file "$wd/h-cfg" | grep -q "statically linked" \
-      || die "直接调用 clang++ 未默认静态链接"
-    ok "直接调用 clang++ (clang++.cfg 自动装载) 默认静态链接成功"
-  else
-    ok "直接调用 clang++ (clang++.cfg 自动装载) 编译成功"
+  # --- 冒烟测试：RISC-V 32 双架构联动验证 (若存在 sysroot32) ---
+  if [ -f "$INSTALL/bin/riscv32-unknown-linux-musl.cfg" ] && [ -d "$INSTALL/sysroot32" ]; then
+    log "执行 RISC-V 32 目标联动验证 (clang --target=riscv32-unknown-linux-musl)"
+    "$INSTALL/bin/clang" --target=riscv32-unknown-linux-musl "$wd/hello.c" -o "$wd/hello-rv32"
+    file "$wd/hello-rv32" | grep -q "ELF 32-bit" || die "rv32 联动 C 冒烟测试产物不是 32 位 ELF"
+    file "$wd/hello-rv32" | grep -q "statically linked" || die "rv32 联动 C 冒烟测试产物不是静态链接"
+    ok "RISC-V 32 C 静态链接验证通过 (32 位 ELF)"
+
+    "$INSTALL/bin/clang++" --target=riscv32-unknown-linux-musl "$wd/h.cpp" -o "$wd/h-rv32"
+    file "$wd/h-rv32" | grep -q "ELF 32-bit" || die "rv32 联动 C++ 冒烟测试产物不是 32 位 ELF"
+    file "$wd/h-rv32" | grep -q "statically linked" || die "rv32 联动 C++ 冒烟测试产物不是静态链接"
+    ok "RISC-V 32 C++/libc++ 静态链接验证通过 (32 位 ELF)"
+
+    if [ -x "$INSTALL/bin/riscv32-unknown-linux-musl-clang" ]; then
+      "$INSTALL/bin/riscv32-unknown-linux-musl-clang" "$wd/hello.c" -o "$wd/hello-rv32-alias"
+      file "$wd/hello-rv32-alias" | grep -q "ELF 32-bit" || die "riscv32-unknown-linux-musl-clang 别名调用失败"
+      ok "RISC-V 32 三元组别名直接调用验证通过"
+    fi
   fi
 
   # --- 冒烟测试：MLIR (若启用/已安装) ---

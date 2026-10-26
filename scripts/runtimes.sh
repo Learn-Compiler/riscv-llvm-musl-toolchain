@@ -80,6 +80,7 @@ ensure_runtimes_configured() {
     -DCMAKE_CXX_COMPILER_TARGET="$T" \
     -DCMAKE_ASM_COMPILER_TARGET="$T" \
     -DCMAKE_SYSROOT="$SYSROOT" \
+    -DCMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY \
     -DCOMPILER_RT_DEFAULT_TARGET_ONLY=ON \
     -DCOMPILER_RT_BUILD_CRT=ON \
     -DCOMPILER_RT_BUILD_SANITIZERS=OFF \
@@ -167,6 +168,14 @@ step_musl() {
     ln -sf ../usr/lib/libc.so "$SYSROOT/lib/$LD_MUSL_SO"
   fi
   cp -rL "$hdr_dir/." "$SYSROOT/usr/include/"
+
+  if [ "$(basename "$SYSROOT")" = "sysroot32" ]; then
+    ln -sfn sysroot32 "$INSTALL/sysroot-riscv32"
+  fi
+  if [ "$TARGET" = "riscv32-linux-musl" ] && [ "$(basename "$SYSROOT")" = "sysroot" ]; then
+    ln -sfn sysroot "$INSTALL/sysroot32"
+  fi
+
   mark musl
   ok "目标 C 运行库 (libc.a) 编译并安装就绪"
 }
@@ -199,6 +208,7 @@ step_compiler_rt() {
       cp -a "$b" "$inst_res/libclang_rt.builtins.a"
       cp -a "$b" "$inst_res/$builtin_name"
       cp -a "$b" "$SYSROOT/usr/lib/libclang_rt.builtins.a"
+      cp -a "$b" "$SYSROOT/lib/libclang_rt.builtins.a"
       break
     fi
   done
@@ -211,8 +221,14 @@ step_compiler_rt() {
       cp -a "$cdir/$crt_end"   "$inst_res/clang_rt.crtend.o"
       cp -a "$cdir/$crt_begin" "$inst_res/crtbegin.o"
       cp -a "$cdir/$crt_end"   "$inst_res/crtend.o"
+      cp -a "$cdir/$crt_begin" "$inst_res/crtbeginT.o"
+      cp -a "$cdir/$crt_begin" "$inst_res/crtbeginS.o"
+      cp -a "$cdir/$crt_end"   "$inst_res/crtendS.o"
       cp -a "$cdir/$crt_begin" "$SYSROOT/usr/lib/crtbegin.o" 2>/dev/null || true
       cp -a "$cdir/$crt_end"   "$SYSROOT/usr/lib/crtend.o" 2>/dev/null || true
+      cp -a "$cdir/$crt_begin" "$SYSROOT/usr/lib/crtbeginT.o" 2>/dev/null || true
+      cp -a "$cdir/$crt_begin" "$SYSROOT/usr/lib/crtbeginS.o" 2>/dev/null || true
+      cp -a "$cdir/$crt_end"   "$SYSROOT/usr/lib/crtendS.o" 2>/dev/null || true
       break
     fi
   done
@@ -237,33 +253,70 @@ step_libcxx() {
   "$BOOT/bin/ninja" -C "$RUNTIMES_BUILD" -j"$JOBS" install-cxx install-cxxabi install-unwind
 
   local inst_rtdir="$INSTALL/lib/$T"
-  [ -d "$inst_rtdir" ] || inst_rtdir="$INSTALL/lib"
-  if [ -f "$inst_rtdir/libc++.a" ] && [ -f "$inst_rtdir/libc++abi.a" ]; then
+  mkdir -p "$inst_rtdir" "$SYSROOT/usr/lib" "$SYSROOT/lib"
+
+  local src_libcxx="$RUNTIMES_BUILD/lib/libc++.a"
+  local src_libcxxabi="$RUNTIMES_BUILD/lib/libc++abi.a"
+  local src_unwind="$RUNTIMES_BUILD/lib/libunwind.a"
+  [ -f "$src_libcxx" ] || src_libcxx="$INSTALL/lib/libc++.a"
+  [ -f "$src_libcxxabi" ] || src_libcxxabi="$INSTALL/lib/libc++abi.a"
+  [ -f "$src_unwind" ] || src_unwind="$INSTALL/lib/libunwind.a"
+
+  if [ -f "$src_libcxx" ] && [ -f "$src_libcxxabi" ]; then
     log "合并 libc++abi.a 到静态 libc++.a"
     local mri_script="$RUNTIMES_BUILD/merge_libcxx.mri"
     cat > "$mri_script" <<MRI_EOF
-CREATE $inst_rtdir/libc++_merged.a
-ADDLIB $inst_rtdir/libc++.a
-ADDLIB $inst_rtdir/libc++abi.a
+CREATE $SYSROOT/usr/lib/libc++.a
+ADDLIB $src_libcxx
+ADDLIB $src_libcxxabi
 SAVE
 END
 MRI_EOF
     "$INSTALL/bin/llvm-ar" -M < "$mri_script"
-    mv -f "$inst_rtdir/libc++_merged.a" "$inst_rtdir/libc++.a"
     rm -f "$mri_script"
+    cp -a "$SYSROOT/usr/lib/libc++.a" "$SYSROOT/lib/libc++.a"
+    cp -a "$SYSROOT/usr/lib/libc++.a" "$inst_rtdir/libc++.a"
+  elif [ -f "$src_libcxx" ]; then
+    cp -a "$src_libcxx" "$SYSROOT/usr/lib/libc++.a"
+    cp -a "$src_libcxx" "$SYSROOT/lib/libc++.a"
+    cp -a "$src_libcxx" "$inst_rtdir/libc++.a"
   fi
 
-  mkdir -p "$SYSROOT/usr/lib" "$SYSROOT/lib"
-  if [ -d "$inst_rtdir" ]; then
-    cp -a "$inst_rtdir"/libc++*   "$SYSROOT/usr/lib/" 2>/dev/null || true
-    cp -a "$inst_rtdir"/libunwind* "$SYSROOT/usr/lib/" 2>/dev/null || true
-    cp -a "$inst_rtdir"/libc++*   "$SYSROOT/lib/" 2>/dev/null || true
-    cp -a "$inst_rtdir"/libunwind* "$SYSROOT/lib/" 2>/dev/null || true
+  if [ -f "$src_unwind" ]; then
+    cp -a "$src_unwind" "$SYSROOT/usr/lib/libunwind.a"
+    cp -a "$src_unwind" "$SYSROOT/lib/libunwind.a"
+    cp -a "$src_unwind" "$inst_rtdir/libunwind.a"
   fi
 
   if [ "${ENABLE_SHARED:-OFF}" = "OFF" ]; then
     rm -f "$SYSROOT"/usr/lib/libc++.so* "$SYSROOT"/usr/lib/libc++abi.so* "$SYSROOT"/usr/lib/libunwind.so* "$SYSROOT"/usr/lib/libc.so* "$SYSROOT"/usr/lib/"$LD_MUSL_SO" 2>/dev/null || true
     rm -f "$SYSROOT"/lib/libc++.so* "$SYSROOT"/lib/libc++abi.so* "$SYSROOT"/lib/libunwind.so* "$SYSROOT"/lib/libc.so* "$SYSROOT"/lib/"$LD_MUSL_SO" 2>/dev/null || true
+  fi
+
+  # 若构建的是 riscv32 模块，自动生成 riscv32 专用配置与三元组软链接
+  if [ "$TARGET" = "riscv32-linux-musl" ]; then
+    log "生成 RISC-V 32 专用配置 ($INSTALL/bin/riscv32-unknown-linux-musl.cfg) 与编译器入口软链接"
+    local sysroot_rel
+    sysroot_rel="$(basename "$SYSROOT")"
+    cat > "$INSTALL/bin/riscv32-unknown-linux-musl.cfg" <<CFG_EOF
+--target=riscv32-unknown-linux-musl
+--sysroot=<CFGDIR>/../${sysroot_rel}
+-march=rv32gc
+-mabi=ilp32d
+-fuse-ld=lld
+-rtlib=compiler-rt
+-unwindlib=libunwind
+-stdlib=libc++
+CFG_EOF
+    if [ "${DEFAULT_STATIC_LINK:-ON}" = "ON" ]; then
+      echo "-static" >> "$INSTALL/bin/riscv32-unknown-linux-musl.cfg"
+    fi
+    ln -sfn riscv32-unknown-linux-musl.cfg "$INSTALL/bin/riscv32.cfg"
+    ln -sfn riscv32-unknown-linux-musl.cfg "$INSTALL/bin/riscv32-linux-musl.cfg"
+    ln -sfn clang "$INSTALL/bin/riscv32-unknown-linux-musl-clang"
+    ln -sfn clang++ "$INSTALL/bin/riscv32-unknown-linux-musl-clang++"
+    ln -sfn clang "$INSTALL/bin/riscv32-linux-musl-clang"
+    ln -sfn clang++ "$INSTALL/bin/riscv32-linux-musl-clang++"
   fi
 
   mark libcxx

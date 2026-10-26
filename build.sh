@@ -70,23 +70,35 @@ show_help() {
   ./build.sh --package           构建完成后打包生成 .tar.zst 离线发布包
   ./build.sh --clean             清理编译临时目录与时间戳（保留 .bootstrap）
   ./build.sh --clean-all         清理所有内容（包括 .bootstrap 引导工具）
-  ./build.sh --target <目标名>   指定目标平台配置 (对应 config/targets/<目标名>.env)
+  ./build.sh --target <目标名>   指定目标平台配置 (支持 riscv32-unknown-linux-musl, riscv64-linux-musl 等)
+  ./build.sh --riscv32, --rv32   快捷切换目标平台为 RISC-V 32 (riscv32-unknown-linux-musl)
+  ./build.sh --riscv64, --rv64   快捷切换目标平台为 RISC-V 64 (riscv64-unknown-linux-musl，默认)
+  ./build.sh --multilib-rv32     双架构模式：构建 64 位工具链同时追加编译 32 位完整运行库
+  ./build.sh --sysroot <DIR>     自定义指定目标 Sysroot 安装/检索目录
 
 可选步骤名列表:
-  bootstrap   - 准备免 root 引导工具并探测宿主 C++
-  fetch       - 拉取源码或挂载本地自研源码 (llvm, musl, torch-mlir)
-  llvm        - 编译 LLVM 核心编译器工具 (clang/lld/llvm-ar 等)
-  musl        - 独立编译目标 C 运行库 Musl (libc.a) 并准备 Linux 头文件
-  compiler-rt - 独立编译目标编译器基础运行库 (builtins / crtbegin / crtend)
-  libc++      - 独立编译目标 C++ 运行时 (libunwind / libc++ / libc++abi)
-  runtimes    - 编排并编译目标端全套运行时 (musl -> compiler-rt -> libc++)
-  torch-mlir  - 配置并构建 torch-mlir 组件 (可扩展插件阶段)
-  prune       - 精简无用跨平台工具、剥离符号、生成三元组链接与 .cfg
-  verify      - 工具链运行库检查与 C/C++ 冒烟测试
-  package     - 离线打包生成 .tar.zst 与 SHA256 校验和
+  bootstrap        - 准备免 root 引导工具并探测宿主 C++
+  fetch            - 拉取源码或挂载本地自研源码 (llvm, musl, torch-mlir)
+  llvm             - 编译 LLVM 核心编译器工具 (clang/lld/llvm-ar 等)
+  musl             - 独立编译目标 C 运行库 Musl (libc.a) 并准备 Linux 头文件
+  compiler-rt      - 独立编译目标编译器基础运行库 (builtins / crtbegin / crtend)
+  libc++           - 独立编译目标 C++ 运行时 (libunwind / libc++ / libc++abi)
+  runtimes         - 编排并编译目标端全套运行时 (musl -> compiler-rt -> libc++)
+  musl-rv32        - 独立为 riscv32 编译目标 C 运行库 Musl (libc.a)
+  compiler-rt-rv32 - 独立为 riscv32 编译目标基础运行库 (builtins / crt)
+  libc++-rv32      - 独立为 riscv32 编译目标 C++ 运行时 (libc++ / libunwind)
+  runtimes-rv32    - 独立编译 riscv32 全套运行时并配置 riscv32-unknown-linux-musl.cfg
+  verify-rv32      - 独立对 riscv32 目标运行库与 C/C++ 进行冒烟测试
+  torch-mlir       - 配置并构建 torch-mlir 组件 (可扩展插件阶段)
+  prune            - 精简无用跨平台工具、剥离符号、生成三元组链接与 .cfg
+  verify           - 工具链运行库检查与 C/C++ 冒烟测试
+  package          - 离线打包生成 .tar.zst 与 SHA256 校验和
 
 常用组合示例:
   ./build.sh --default
+  ./build.sh --riscv32 --default
+  ./build.sh --multilib-rv32
+  ./build.sh --step runtimes-rv32
   ./build.sh --enable-mlir --debug
   ./build.sh --projects "clang;lld;mlir" --targets "RISCV;X86" --debug
   ./build.sh --step llvm --debug --cmake-args "-DLLVM_BUILD_EXAMPLES=OFF"
@@ -128,6 +140,9 @@ CLI_JOBS=""
 CLI_ENABLE_CCACHE=""
 CLI_INSTALL_TOOLCHAIN=""
 CLI_INSTALL_AI=""
+CLI_TARGET=""
+CLI_ENABLE_RV32=0
+CLI_SYSROOT=""
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -357,8 +372,25 @@ while [ $# -gt 0 ]; do
       shift 2
       ;;
     --target)
-      [ -n "${2:-}" ] || die "--target 需要指定目标名称"
-      TARGET="$2"
+      [ -n "${2:-}" ] || die "--target 需要指定目标名称 (如 riscv32-unknown-linux-musl, riscv64-linux-musl)"
+      CLI_TARGET="$2"
+      shift 2
+      ;;
+    --riscv32|--rv32)
+      CLI_TARGET="riscv32-linux-musl"
+      shift
+      ;;
+    --riscv64|--rv64)
+      CLI_TARGET="riscv64-linux-musl"
+      shift
+      ;;
+    --multilib-rv32|--enable-rv32|--with-rv32)
+      CLI_ENABLE_RV32=1
+      shift
+      ;;
+    --sysroot)
+      [ -n "${2:-}" ] || die "$1 需要指定 sysroot 路径"
+      CLI_SYSROOT="$2"
       shift 2
       ;;
     --clean)
@@ -380,6 +412,8 @@ while [ $# -gt 0 ]; do
 done
 
 # 初始化基础配置与目标平台
+[ -n "${CLI_TARGET:-}" ] && TARGET="$CLI_TARGET"
+[ -n "${CLI_SYSROOT:-}" ] && { SYSROOT="$CLI_SYSROOT"; SYSROOT_OVERRIDDEN=1; }
 init_config
 [ -n "$CLI_JOBS" ]                && JOBS="$CLI_JOBS"
 [ -n "$CLI_ENABLE_CCACHE" ]       && ENABLE_CCACHE="$CLI_ENABLE_CCACHE"
@@ -528,6 +562,69 @@ source "$SRC/scripts/verify.sh"
 # shellcheck disable=SC1091
 source "$SRC/scripts/package.sh"
 
+step_musl_rv32() {
+  local saved_t="$TARGET" saved_sysroot="${SYSROOT:-}" saved_br="${BUILD_RUNTIMES:-}"
+  TARGET="riscv32-linux-musl"
+  unset SYSROOT BUILD_RUNTIMES
+  init_config
+  step_musl
+  TARGET="$saved_t"
+  [ -n "$saved_sysroot" ] && SYSROOT="$saved_sysroot"
+  [ -n "$saved_br" ] && BUILD_RUNTIMES="$saved_br"
+  init_config
+}
+
+step_compiler_rt_rv32() {
+  local saved_t="$TARGET" saved_sysroot="${SYSROOT:-}" saved_br="${BUILD_RUNTIMES:-}"
+  TARGET="riscv32-linux-musl"
+  unset SYSROOT BUILD_RUNTIMES
+  init_config
+  step_compiler_rt
+  TARGET="$saved_t"
+  [ -n "$saved_sysroot" ] && SYSROOT="$saved_sysroot"
+  [ -n "$saved_br" ] && BUILD_RUNTIMES="$saved_br"
+  init_config
+}
+
+step_libcxx_rv32() {
+  local saved_t="$TARGET" saved_sysroot="${SYSROOT:-}" saved_br="${BUILD_RUNTIMES:-}"
+  TARGET="riscv32-linux-musl"
+  unset SYSROOT BUILD_RUNTIMES
+  init_config
+  step_libcxx
+  TARGET="$saved_t"
+  [ -n "$saved_sysroot" ] && SYSROOT="$saved_sysroot"
+  [ -n "$saved_br" ] && BUILD_RUNTIMES="$saved_br"
+  init_config
+}
+
+step_runtimes_rv32() {
+  log "构建 RISC-V 32 目标运行库全集 (riscv32-unknown-linux-musl: musl -> compiler-rt -> libc++)"
+  local saved_t="$TARGET" saved_sysroot="${SYSROOT:-}" saved_br="${BUILD_RUNTIMES:-}"
+  TARGET="riscv32-linux-musl"
+  unset SYSROOT BUILD_RUNTIMES
+  init_config
+  step_runtimes
+  TARGET="$saved_t"
+  [ -n "$saved_sysroot" ] && SYSROOT="$saved_sysroot"
+  [ -n "$saved_br" ] && BUILD_RUNTIMES="$saved_br"
+  init_config
+  ok "RISC-V 32 目标运行库全集构建完成"
+}
+
+step_verify_rv32() {
+  log "验证 RISC-V 32 工具链运行库与冒烟测试"
+  local saved_t="$TARGET" saved_sysroot="${SYSROOT:-}" saved_br="${BUILD_RUNTIMES:-}"
+  TARGET="riscv32-linux-musl"
+  unset SYSROOT BUILD_RUNTIMES
+  init_config
+  step_verify
+  TARGET="$saved_t"
+  [ -n "$saved_sysroot" ] && SYSROOT="$saved_sysroot"
+  [ -n "$saved_br" ] && BUILD_RUNTIMES="$saved_br"
+  init_config
+}
+
 run_step() {
   local step="$1"
 
@@ -566,6 +663,21 @@ run_step() {
       ;;
     runtimes|runtime)
       step_runtimes
+      ;;
+    musl-rv32|musl32)
+      step_musl_rv32
+      ;;
+    builtins-rv32|compiler-rt-rv32|compiler_rt-rv32|compiler-rt32)
+      step_compiler_rt_rv32
+      ;;
+    libcxx-rv32|libc++-rv32|libunwind-rv32|libcxx32)
+      step_libcxx_rv32
+      ;;
+    runtimes-rv32|runtimes32|runtime-rv32|runtime32)
+      step_runtimes_rv32
+      ;;
+    verify-rv32|verify32)
+      step_verify_rv32
       ;;
     torch-mlir|torch_mlir)
       step_torch_mlir
@@ -611,6 +723,36 @@ if [ ${#SELECTED_STEPS[@]} -gt 0 ]; then
         unmark libcxx
         unmark libc++
         ;;
+      musl-rv32|musl32)
+        TARGET="riscv32-linux-musl" init_config
+        unmark musl
+        unmark runtimes
+        ;;
+      compiler-rt-rv32|compiler_rt-rv32|builtins-rv32|compiler-rt32)
+        TARGET="riscv32-linux-musl" init_config
+        unmark compiler_rt
+        unmark builtins
+        unmark runtimes
+        ;;
+      libcxx-rv32|libc++-rv32|libunwind-rv32|libcxx32)
+        TARGET="riscv32-linux-musl" init_config
+        unmark libcxx
+        unmark libc++
+        unmark runtimes
+        ;;
+      runtimes-rv32|runtimes32|runtime-rv32|runtime32)
+        TARGET="riscv32-linux-musl" init_config
+        unmark runtimes
+        unmark musl
+        unmark compiler_rt
+        unmark builtins
+        unmark libcxx
+        unmark libc++
+        ;;
+      verify-rv32|verify32)
+        TARGET="riscv32-linux-musl" init_config
+        unmark verify
+        ;;
       *)
         unmark "$step"
         ;;
@@ -639,6 +781,9 @@ fi
 PIPELINE=(bootstrap fetch llvm runtimes prune verify)
 if [ "${ENABLE_TORCH_MLIR:-0}" = 1 ] || [ "${CLI_ENABLE_TORCH_MLIR:-0}" = 1 ]; then
   PIPELINE=(bootstrap fetch llvm runtimes torch-mlir prune verify)
+fi
+if [ "${CLI_ENABLE_RV32:-0}" = 1 ]; then
+  PIPELINE+=(runtimes-rv32 verify-rv32)
 fi
 
 if [ "$ONLY_FETCH" = 1 ]; then

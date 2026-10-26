@@ -138,13 +138,21 @@ step_prune() {
   fi
 
   # ─── 4. 净化三元组别名，保持 bin 目录极致纯净 ─────────────────────────
-  # 清理旧有的冗余三元组别名前缀工具，避免 17 个冗余软链接污染 bin 目录
-  rm -f "$INSTALL_TOOLCHAIN/bin/${T}-"*
+  # 清理旧有的冗余跨平台别名前缀工具，避免冗余软链接污染 bin 目录
+  for prefix in riscv64-unknown-linux-musl- riscv64-linux-musl-; do
+    for f in "$INSTALL_TOOLCHAIN/bin/${prefix}"*; do
+      if [ -L "$f" ] || [ -f "$f" ]; then
+        rm -f "$f"
+      fi
+    done
+  done
 
   # ─── 5. 生成 Clang 自动装载的 .cfg 配置文件 ────────────────────────
+  local cfg_sysroot_rel
+  cfg_sysroot_rel="$(basename "$SYSROOT")"
   cat > "$INSTALL_TOOLCHAIN/bin/clang.cfg" <<EOF
 --target=${TARGET_TRIPLE}
---sysroot=<CFGDIR>/../sysroot
+--sysroot=<CFGDIR>/../${cfg_sysroot_rel}
 -fuse-ld=lld
 -rtlib=compiler-rt
 -unwindlib=libunwind
@@ -159,9 +167,34 @@ EOF
     echo "-static" >> "$INSTALL_TOOLCHAIN/bin/clang.cfg"
   fi
 
-  # 建立 clang++.cfg 软链接，确保直接运行 clang/clang++ 自动生效 (不再创建冗余 ${T}.cfg 避免重复装载)
+  # 建立 clang++.cfg 软链接，确保直接运行 clang/clang++ 自动生效
   ln -sf clang.cfg "$INSTALL_TOOLCHAIN/bin/clang++.cfg"
-  rm -f "$INSTALL_TOOLCHAIN/bin/${T}.cfg"
+  rm -f "$INSTALL_TOOLCHAIN/bin/riscv64-unknown-linux-musl.cfg" "$INSTALL_TOOLCHAIN/bin/riscv64-linux-musl.cfg"
+
+  # 若存在 sysroot32 或当前为 rv32 目标，确保 riscv32 独立配置与调用入口就绪
+  if [ -d "$INSTALL_TOOLCHAIN/sysroot32" ] || [ "$TARGET" = "riscv32-linux-musl" ]; then
+    local rv32_sysroot_rel="sysroot32"
+    [ "$TARGET" = "riscv32-linux-musl" ] && rv32_sysroot_rel="$(basename "$SYSROOT")"
+    cat > "$INSTALL_TOOLCHAIN/bin/riscv32-unknown-linux-musl.cfg" <<RV32_CFG_EOF
+--target=riscv32-unknown-linux-musl
+--sysroot=<CFGDIR>/../${rv32_sysroot_rel}
+-march=rv32gc
+-mabi=ilp32d
+-fuse-ld=lld
+-rtlib=compiler-rt
+-unwindlib=libunwind
+-stdlib=libc++
+RV32_CFG_EOF
+    if [ "${DEFAULT_STATIC_LINK:-ON}" = "ON" ]; then
+      echo "-static" >> "$INSTALL_TOOLCHAIN/bin/riscv32-unknown-linux-musl.cfg"
+    fi
+    ln -sfn riscv32-unknown-linux-musl.cfg "$INSTALL_TOOLCHAIN/bin/riscv32.cfg"
+    ln -sfn riscv32-unknown-linux-musl.cfg "$INSTALL_TOOLCHAIN/bin/riscv32-linux-musl.cfg"
+    ln -sfn clang "$INSTALL_TOOLCHAIN/bin/riscv32-unknown-linux-musl-clang"
+    ln -sfn clang++ "$INSTALL_TOOLCHAIN/bin/riscv32-unknown-linux-musl-clang++"
+    ln -sfn clang "$INSTALL_TOOLCHAIN/bin/riscv32-linux-musl-clang"
+    ln -sfn clang++ "$INSTALL_TOOLCHAIN/bin/riscv32-linux-musl-clang++"
+  fi
 
   # ─── 6. 生成统一环境激活脚本 env.sh ──────────────────────────────────
   cat > "$SRC/env.sh" <<'ENV_EOF'
