@@ -40,11 +40,13 @@ show_help() {
   ./build.sh --projects <LIST>   指定要构建的 LLVM 子项目列表 (如 "clang;lld;mlir"，分号分隔)
   ./build.sh --enable-mlir       快捷启用 MLIR 子项目 (自动将 mlir 追加至构建列表)
   ./build.sh --enable-torch-mlir 快捷启用 MLIR 与 torch-mlir 完整流水线 (亦支持 --torch-mlir)
+  ./build.sh --enable-triton     快捷启用 MLIR 与 Triton 完整流水线 (亦支持 --triton)
   ./build.sh --targets <LIST>    指定 LLVM 目标架构 (如 "RISCV;X86" 或 "all"，分号分隔)
   ./build.sh --runtimes <LIST>   指定 LLVM 目标端运行时列表 (分号分隔)
   ./build.sh --cmake-args <ARGS> 透传额外 CMake 参数至 LLVM (如 "-DLLVM_BUILD_EXAMPLES=OFF")
   ./build.sh --musl-args <ARGS>  透传额外配置参数至 Musl configure
   ./build.sh --torch-mlir-src <DIR> 挂载 torch-mlir 源码目录 (预留组件扩展)
+  ./build.sh --triton-src <DIR>     挂载 Triton 源码目录 (预留 AI 编译器扩展)
   ./build.sh --llvm-src <DIR>    挂载本地自研 LLVM 源码目录 (无需重新拉取 Git)
   ./build.sh --musl-src <DIR>    挂载本地自研 Musl 源码目录 (无需重新拉取 Git)
 
@@ -55,6 +57,7 @@ show_help() {
   ./build.sh --no-strip          保留宿主程序与库调试符号
   ./build.sh --llvm-version <REF>       指定 LLVM 版本/分支/Tag/Commit (默认: config/versions.lock)
   ./build.sh --torch-mlir-version <REF> 指定 torch-mlir 版本/分支/Tag/Commit
+  ./build.sh --triton-version <REF>     指定 Triton 版本/分支/Tag/Commit (默认: config/versions.lock)
   ./build.sh --musl-version <REF>       指定 Musl 版本/分支/Tag/Commit (默认: v1.2.5)
   ./build.sh --linux-headers-version <REF> 指定 linux-headers 版本/分支/Tag (默认: master)
   ./build.sh --strict-versions          开启严格版本校验 (LLVM 与 torch-mlir 不匹配时报错中止)
@@ -78,7 +81,7 @@ show_help() {
 
 可选步骤名列表:
   bootstrap        - 准备免 root 引导工具并探测宿主 C++
-  fetch            - 拉取源码或挂载本地自研源码 (llvm, musl, torch-mlir)
+  fetch            - 拉取源码或挂载本地自研源码 (llvm, musl, torch-mlir, triton)
   llvm             - 编译 LLVM 核心编译器工具 (clang/lld/llvm-ar 等)
   musl             - 独立编译目标 C 运行库 Musl (libc.a) 并准备 Linux 头文件
   compiler-rt      - 独立编译目标编译器基础运行库 (builtins / crtbegin / crtend)
@@ -90,6 +93,7 @@ show_help() {
   runtimes-rv32    - 独立编译 riscv32 全套运行时并配置 riscv32-unknown-linux-musl.cfg
   verify-rv32      - 独立对 riscv32 目标运行库与 C/C++ 进行冒烟测试
   torch-mlir       - 配置并构建 torch-mlir 组件 (可扩展插件阶段)
+  triton           - 配置并构建 Triton 组件 (可扩展 AI 编译器插件阶段)
   prune            - 精简无用跨平台工具、剥离符号、生成三元组链接与 .cfg
   verify           - 工具链运行库检查与 C/C++ 冒烟测试
   package          - 离线打包生成 .tar.zst 与 SHA256 校验和
@@ -100,9 +104,11 @@ show_help() {
   ./build.sh --multilib-rv32
   ./build.sh --step runtimes-rv32
   ./build.sh --enable-mlir --debug
+  ./build.sh --enable-triton
   ./build.sh --projects "clang;lld;mlir" --targets "RISCV;X86" --debug
   ./build.sh --step llvm --debug --cmake-args "-DLLVM_BUILD_EXAMPLES=OFF"
   ./build.sh --step torch-mlir --torch-mlir-src /path/to/torch-mlir
+  ./build.sh --step triton --triton-src /path/to/triton
 EOF
   exit 0
 }
@@ -123,8 +129,10 @@ CLI_DEFAULT_STATIC_LINK=""
 CLI_LLVM_PROJECTS=""
 CLI_ENABLE_MLIR=0
 CLI_ENABLE_TORCH_MLIR=0
+CLI_ENABLE_TRITON=0
 CLI_LLVM_REF=""
 CLI_TORCH_MLIR_REF=""
+CLI_TRITON_REF=""
 CLI_MUSL_REF=""
 CLI_STRICT_VERSIONS=0
 CLI_LLVM_TARGETS=""
@@ -132,6 +140,8 @@ CLI_LLVM_RUNTIMES=""
 CLI_LLVM_EXTRA_CMAKE_ARGS=()
 CLI_MUSL_EXTRA_ARGS=()
 CLI_TORCH_MLIR_SRC=""
+CLI_TRITON_SRC=""
+CLI_TRITON_EXTRA_CMAKE_ARGS=()
 CLI_LLVM_SRC=""
 CLI_MUSL_SRC=""
 CLI_LINUX_HEADERS_REF=""
@@ -159,11 +169,14 @@ while [ $# -gt 0 ]; do
       CLI_LLVM_PROJECTS=""
       CLI_ENABLE_MLIR=0
       CLI_ENABLE_TORCH_MLIR=0
+      CLI_ENABLE_TRITON=0
       CLI_LLVM_TARGETS=""
       CLI_LLVM_RUNTIMES=""
       CLI_LLVM_EXTRA_CMAKE_ARGS=()
       CLI_MUSL_EXTRA_ARGS=()
       CLI_TORCH_MLIR_SRC=""
+      CLI_TRITON_SRC=""
+      CLI_TRITON_EXTRA_CMAKE_ARGS=()
       CLI_LLVM_SRC=""
       CLI_MUSL_SRC=""
       shift
@@ -225,6 +238,11 @@ while [ $# -gt 0 ]; do
       CLI_ENABLE_MLIR=1
       shift
       ;;
+    --enable-triton|--triton)
+      CLI_ENABLE_TRITON=1
+      CLI_ENABLE_MLIR=1
+      shift
+      ;;
     --targets|--llvm-targets|--targets-to-build)
       [ -n "${2:-}" ] || die "$1 需要指定目标架构列表 (如 \"RISCV;X86\")"
       CLI_LLVM_TARGETS="$2"
@@ -250,6 +268,16 @@ while [ $# -gt 0 ]; do
       CLI_TORCH_MLIR_SRC="$2"
       shift 2
       ;;
+    --triton-src)
+      [ -n "${2:-}" ] || die "$1 需要指定 triton 源码目录"
+      CLI_TRITON_SRC="$2"
+      shift 2
+      ;;
+    --triton-args)
+      [ -n "${2:-}" ] || die "$1 需要指定 Triton 额外 CMake 参数"
+      CLI_TRITON_EXTRA_CMAKE_ARGS+=("$2")
+      shift 2
+      ;;
     --llvm-version|--llvm-ref)
       [ -n "${2:-}" ] || die "$1 需要指定 LLVM 版本 (如 \"release/23.x\"、\"llvmorg-23.1.3\" 或 Commit SHA)"
       CLI_LLVM_REF="$2"
@@ -258,6 +286,11 @@ while [ $# -gt 0 ]; do
     --torch-mlir-version|--torch-mlir-ref)
       [ -n "${2:-}" ] || die "$1 需要指定 torch-mlir 版本或 Commit SHA"
       CLI_TORCH_MLIR_REF="$2"
+      shift 2
+      ;;
+    --triton-version|--triton-ref)
+      [ -n "${2:-}" ] || die "$1 需要指定 Triton 版本或 Tag (默认: config/versions.lock)"
+      CLI_TRITON_REF="$2"
       shift 2
       ;;
     --musl-version|--musl-ref)
@@ -395,13 +428,13 @@ while [ $# -gt 0 ]; do
       ;;
     --clean)
       log "清理构建缓存与时间戳 ..."
-      rm -rf "$STAMPS" "$BUILD" "$SRC/build-compiler-rt" "$SRC/build-runtimes" "$SRC/build-runtimes-riscv32" "$SRC/build-torch-mlir" "${INSTALL_TOOLCHAIN:-$INSTALL}" "${INSTALL_AI:-$SRC/install-ai}" "$SRC/install-clang-musl" "$SRC/env.sh" "$SHIM"
+      rm -rf "$STAMPS" "$BUILD" "$SRC/build-compiler-rt" "$SRC/build-runtimes" "$SRC/build-runtimes-riscv32" "$SRC/build-torch-mlir" "$SRC/build-triton" "${INSTALL_TOOLCHAIN:-$INSTALL}" "${INSTALL_AI:-$SRC/install-ai}" "$SRC/install-clang-musl" "$SRC/env.sh" "$SHIM"
       ok "清理完成"
       exit 0
       ;;
     --clean-all)
       log "完全清理构建缓存与引导环境 ..."
-      rm -rf "$STAMPS" "$BUILD" "$SRC/build-compiler-rt" "$SRC/build-runtimes" "$SRC/build-runtimes-riscv32" "$SRC/build-torch-mlir" "${INSTALL_TOOLCHAIN:-$INSTALL}" "${INSTALL_AI:-$SRC/install-ai}" "$SRC/install-clang-musl" "$SRC/env.sh" "$SHIM" "$BOOT"
+      rm -rf "$STAMPS" "$BUILD" "$SRC/build-compiler-rt" "$SRC/build-runtimes" "$SRC/build-runtimes-riscv32" "$SRC/build-torch-mlir" "$SRC/build-triton" "${INSTALL_TOOLCHAIN:-$INSTALL}" "${INSTALL_AI:-$SRC/install-ai}" "$SRC/install-clang-musl" "$SRC/env.sh" "$SHIM" "$BOOT"
       ok "全部清理完成"
       exit 0
       ;;
@@ -429,14 +462,15 @@ init_config
 [ -n "$CLI_LLVM_SRC" ]            && LLVM_SRC="$CLI_LLVM_SRC"
 [ -n "$CLI_MUSL_SRC" ]            && MUSL_SRC="$CLI_MUSL_SRC"
 [ -n "$CLI_TORCH_MLIR_SRC" ]      && TORCH_MLIR_SRC="$CLI_TORCH_MLIR_SRC"
+[ -n "$CLI_TRITON_SRC" ]          && TRITON_SRC="$CLI_TRITON_SRC"
 
 # 编译参数灵活覆盖与扩展
 [ -n "$CLI_LLVM_PROJECTS" ]       && LLVM_ENABLE_PROJECTS="$CLI_LLVM_PROJECTS"
 [ -n "$CLI_LLVM_TARGETS" ]        && LLVM_TARGETS_TO_BUILD="$CLI_LLVM_TARGETS"
 [ -n "$CLI_LLVM_RUNTIMES" ]       && LLVM_ENABLE_RUNTIMES="$CLI_LLVM_RUNTIMES"
 
-# 若显式指定 --enable-mlir 或 --enable-torch-mlir，确保 mlir 被加入到 LLVM_ENABLE_PROJECTS 中
-if [ "$CLI_ENABLE_MLIR" = 1 ] || [ "${CLI_ENABLE_TORCH_MLIR:-0}" = 1 ]; then
+# 若显式指定 --enable-mlir、--enable-torch-mlir 或 --enable-triton，确保 mlir 被加入到 LLVM_ENABLE_PROJECTS 中
+if [ "$CLI_ENABLE_MLIR" = 1 ] || [ "${CLI_ENABLE_TORCH_MLIR:-0}" = 1 ] || [ "${CLI_ENABLE_TRITON:-0}" = 1 ]; then
   if [[ ";${LLVM_ENABLE_PROJECTS};" != *";mlir;"* ]]; then
     LLVM_ENABLE_PROJECTS="${LLVM_ENABLE_PROJECTS};mlir"
   fi
@@ -445,8 +479,12 @@ fi
 if [ "${CLI_ENABLE_TORCH_MLIR:-0}" = 1 ]; then
   ENABLE_TORCH_MLIR=1
 fi
+if [ "${CLI_ENABLE_TRITON:-0}" = 1 ]; then
+  ENABLE_TRITON=1
+fi
 [ -n "${CLI_LLVM_REF:-}" ]       && LLVM_REF="$CLI_LLVM_REF"
 [ -n "${CLI_TORCH_MLIR_REF:-}" ] && TORCH_MLIR_REF="$CLI_TORCH_MLIR_REF"
+[ -n "${CLI_TRITON_REF:-}" ]     && TRITON_REF="$CLI_TRITON_REF"
 [ -n "${CLI_MUSL_REF:-}" ]       && MUSL_REF="$CLI_MUSL_REF"
 [ -n "${CLI_LINUX_HEADERS_REF:-}" ] && LINUX_HEADERS_REF="$CLI_LINUX_HEADERS_REF"
 [ "${CLI_STRICT_VERSIONS:-0}" = 1 ] && STRICT_VERSIONS=1
@@ -457,6 +495,13 @@ if [ ${#CLI_LLVM_EXTRA_CMAKE_ARGS[@]} -gt 0 ]; then
     LLVM_EXTRA_CMAKE_ARGS="${LLVM_EXTRA_CMAKE_ARGS} ${CLI_LLVM_EXTRA_CMAKE_ARGS[*]}"
   else
     LLVM_EXTRA_CMAKE_ARGS="${CLI_LLVM_EXTRA_CMAKE_ARGS[*]}"
+  fi
+fi
+if [ ${#CLI_TRITON_EXTRA_CMAKE_ARGS[@]} -gt 0 ]; then
+  if [ -n "${TRITON_EXTRA_CMAKE_ARGS:-}" ]; then
+    TRITON_EXTRA_CMAKE_ARGS="${TRITON_EXTRA_CMAKE_ARGS} ${CLI_TRITON_EXTRA_CMAKE_ARGS[*]}"
+  else
+    TRITON_EXTRA_CMAKE_ARGS="${CLI_TRITON_EXTRA_CMAKE_ARGS[*]}"
   fi
 fi
 if [ ${#CLI_MUSL_EXTRA_ARGS[@]} -gt 0 ]; then
@@ -473,7 +518,7 @@ if [ "$ENABLE_SHARED" = "ON" ] && [ -z "$CLI_DEFAULT_STATIC_LINK" ]; then
 fi
 
 # 动态版本状态检测：若当前版本配置与上次构建状态不一致，自动清除相关时间戳
-CURRENT_VER_STATE="LLVM=${LLVM_REF:-}|TORCH=${TORCH_MLIR_REF:-}|MUSL=${MUSL_REF:-}|HDRS=${LINUX_HEADERS_REF:-}"
+CURRENT_VER_STATE="LLVM=${LLVM_REF:-}|TORCH=${TORCH_MLIR_REF:-}|TRITON=${TRITON_REF:-}|MUSL=${MUSL_REF:-}|HDRS=${LINUX_HEADERS_REF:-}"
 if [ -f "$STAMPS/.versions_state" ]; then
   PREV_VER_STATE="$(cat "$STAMPS/.versions_state" 2>/dev/null || true)"
   if [ "$CURRENT_VER_STATE" != "$PREV_VER_STATE" ]; then
@@ -482,6 +527,7 @@ if [ -f "$STAMPS/.versions_state" ]; then
     unmark builtins
     unmark llvm
     unmark torch_mlir
+    unmark triton
     unmark prune
     unmark verify
   fi
@@ -501,9 +547,10 @@ if [ -f "$SRC/third_party/llvm/.git_checked_ref" ]; then
     unmark builtins
     unmark llvm
     unmark torch_mlir
+    unmark triton
     unmark prune
     unmark verify
-    rm -rf "$SRC/build-torch-mlir"
+    rm -rf "$SRC/build-torch-mlir" "$SRC/build-triton"
   fi
 fi
 if [ -f "$SRC/third_party/torch-mlir/.git_checked_ref" ]; then
@@ -515,21 +562,34 @@ if [ -f "$SRC/third_party/torch-mlir/.git_checked_ref" ]; then
     rm -rf "$SRC/build-torch-mlir"
   fi
 fi
+if [ -f "$SRC/third_party/triton/.git_checked_ref" ]; then
+  CHECKED_TRITON_REF="$(cat "$SRC/third_party/triton/.git_checked_ref" 2>/dev/null || true)"
+  if [ -n "$CHECKED_TRITON_REF" ] && [ -n "${TRITON_REF:-}" ] && [ "$CHECKED_TRITON_REF" != "$TRITON_REF" ]; then
+    warn "检测到 triton 实际版本 ($CHECKED_TRITON_REF) 与配置 ($TRITON_REF) 不一致，重置源码与构建步骤"
+    unmark fetch
+    unmark triton
+    rm -rf "$SRC/build-triton"
+  fi
+fi
 mkdir -p "$STAMPS"
 echo "$CURRENT_VER_STATE" > "$STAMPS/.versions_state"
 
 # 若显式通过参数指定了自研源码或特定版本变更，自动清理 fetch 时间戳以触发更新
-if [ -n "$CLI_LLVM_SRC" ] || [ -n "$CLI_MUSL_SRC" ] || [ -n "$CLI_TORCH_MLIR_SRC" ] || [ -n "$CLI_LINUX_HEADERS_SRC" ] || \
-   [ -n "$CLI_LLVM_REF" ] || [ -n "$CLI_TORCH_MLIR_REF" ] || [ -n "$CLI_MUSL_REF" ] || [ -n "$CLI_LINUX_HEADERS_REF" ]; then
+if [ -n "$CLI_LLVM_SRC" ] || [ -n "$CLI_MUSL_SRC" ] || [ -n "$CLI_TORCH_MLIR_SRC" ] || [ -n "$CLI_TRITON_SRC" ] || [ -n "$CLI_LINUX_HEADERS_SRC" ] || \
+   [ -n "$CLI_LLVM_REF" ] || [ -n "$CLI_TORCH_MLIR_REF" ] || [ -n "$CLI_TRITON_REF" ] || [ -n "$CLI_MUSL_REF" ] || [ -n "$CLI_LINUX_HEADERS_REF" ]; then
   unmark fetch
 fi
 if [ -n "$CLI_LLVM_REF" ]; then
   unmark builtins
   unmark llvm
   unmark torch_mlir
+  unmark triton
 fi
 if [ -n "$CLI_TORCH_MLIR_REF" ]; then
   unmark torch_mlir
+fi
+if [ -n "$CLI_TRITON_REF" ]; then
+  unmark triton
 fi
 
 # ─── 前置检查 ────────────────────────────────────────────────────────────
@@ -539,7 +599,7 @@ command -v tar  >/dev/null || die "缺少 tar"
 printf '%s%s 无 GCC 工具链构建%s\n' "$c_hd" "$TARGET_TRIPLE" "$c_off"
 printf '  SRC     = %s\n  INSTALL = %s\n  JOBS    = %s\n  BUILD   = %s (Runtimes: %s [%s], Assertions: %s, Strip: %s, Shared: %s, DefaultStatic: %s)\n' "$SRC" "$INSTALL" "$JOBS" "$BUILD_TYPE" "$RUNTIMES_BUILD_TYPE" "${RUNTIMES_OPT_LEVEL:--O2}" "$ENABLE_ASSERTIONS" "$STRIP_SYMBOLS" "$ENABLE_SHARED" "$DEFAULT_STATIC_LINK"
 printf '  PROJECTS= %s\n  TARGETS = %s\n' "${LLVM_ENABLE_PROJECTS:-clang;lld}" "${LLVM_TARGETS_TO_BUILD:-$LLVM_TARGET_ARCH}"
-printf '  VERSIONS= LLVM:%s | torch-mlir:%s | musl:%s | linux-headers:%s\n' "${LLVM_REF:-default}" "${TORCH_MLIR_REF:-default}" "${MUSL_REF:-default}" "${LINUX_HEADERS_REF:-default}"
+printf '  VERSIONS= LLVM:%s | torch-mlir:%s | triton:%s | musl:%s | linux-headers:%s\n' "${LLVM_REF:-default}" "${TORCH_MLIR_REF:-default}" "${TRITON_REF:-default}" "${MUSL_REF:-default}" "${LINUX_HEADERS_REF:-default}"
 [ -n "${LLVM_EXTRA_CMAKE_ARGS:-}" ] && printf '  CMAKE_EXTRA = %s\n' "$LLVM_EXTRA_CMAKE_ARGS"
 
 # 引入所有步骤模块
@@ -555,6 +615,8 @@ source "$SRC/scripts/llvm.sh"
 source "$SRC/scripts/runtimes.sh"
 # shellcheck disable=SC1091
 source "$SRC/scripts/torch_mlir.sh"
+# shellcheck disable=SC1091
+source "$SRC/scripts/triton.sh"
 # shellcheck disable=SC1091
 source "$SRC/scripts/prune.sh"
 # shellcheck disable=SC1091
@@ -705,6 +767,9 @@ run_step() {
     torch-mlir|torch_mlir)
       step_torch_mlir
       ;;
+    triton)
+      step_triton
+      ;;
     prune)
       step_prune
       ;;
@@ -776,6 +841,12 @@ if [ ${#SELECTED_STEPS[@]} -gt 0 ]; then
         TARGET="riscv32-linux-musl"; init_config
         unmark verify
         ;;
+      torch-mlir|torch_mlir)
+        unmark torch_mlir
+        ;;
+      triton)
+        unmark triton
+        ;;
       *)
         unmark "$step"
         ;;
@@ -801,10 +872,14 @@ if [ "$REBUILD_LLVM" = 1 ]; then
 fi
 
 # 标准流水线步骤序列
-PIPELINE=(bootstrap fetch llvm runtimes prune verify)
+PIPELINE=(bootstrap fetch llvm runtimes)
 if [ "${ENABLE_TORCH_MLIR:-0}" = 1 ] || [ "${CLI_ENABLE_TORCH_MLIR:-0}" = 1 ]; then
-  PIPELINE=(bootstrap fetch llvm runtimes torch-mlir prune verify)
+  PIPELINE+=(torch-mlir)
 fi
+if [ "${ENABLE_TRITON:-0}" = 1 ] || [ "${CLI_ENABLE_TRITON:-0}" = 1 ]; then
+  PIPELINE+=(triton)
+fi
+PIPELINE+=(prune verify)
 if [ "${CLI_ENABLE_RV32:-0}" = 1 ]; then
   PIPELINE+=(runtimes-rv32 verify-rv32)
 fi

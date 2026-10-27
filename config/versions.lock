@@ -29,3 +29,8 @@ MUSL_REPO="${MUSL_REPO:-https://github.com/kraj/musl.git}"
 # 4. Linux 内核 UAPI 头文件
 LINUX_HEADERS_REF="${LINUX_HEADERS_REF:-master}"
 LINUX_HEADERS_REPO="${LINUX_HEADERS_REPO:-https://github.com/sabotage-linux/kernel-headers.git}"
+
+# 5. Triton 核心版本 (官方正式发布标签)
+TRITON_REF="${TRITON_REF:-v3.2.0}"
+TRITON_REPO="${TRITON_REPO:-https://github.com/triton-lang/triton.git}"
+

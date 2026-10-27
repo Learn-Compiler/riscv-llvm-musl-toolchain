@@ -38,8 +38,8 @@ step_prune() {
   # ─── 1. 架构隔离：迁移 MLIR 与 Torch-MLIR 至统一 AI 编译器目录 ───
   log "隔离 AI 编译器产物至统一目录 ($INSTALL_AI)"
   
-  # 迁移 AI 可执行工具 (mlir-* / tblgen-* / torch-mlir-*)
-  for p in mlir-* tblgen-* torch-mlir-* llvm-tblgen clang-tblgen; do
+  # 迁移 AI 可执行工具 (mlir-* / tblgen-* / torch-mlir-* / triton-*)
+  for p in mlir-* tblgen-* torch-mlir-* triton-* llvm-tblgen clang-tblgen; do
     for f in "$INSTALL_TOOLCHAIN/bin"/$p; do
       if [ -f "$f" ] || [ -L "$f" ]; then
         mv -f "$f" "$INSTALL_AI/bin/" 2>/dev/null || true
@@ -48,7 +48,7 @@ step_prune() {
   done
 
   # 迁移 AI 相关 C++ / C-API 头文件
-  for d in mlir mlir-c torch-mlir torch-mlir-c torch-mlir-dialects llvm llvm-c clang clang-c lld; do
+  for d in mlir mlir-c torch-mlir torch-mlir-c torch-mlir-dialects triton triton-c llvm llvm-c clang clang-c lld; do
     if [ -d "$INSTALL_TOOLCHAIN/include/$d" ]; then
       rm -rf "$INSTALL_AI/include/$d"
       mv "$INSTALL_TOOLCHAIN/include/$d" "$INSTALL_AI/include/"
@@ -57,7 +57,7 @@ step_prune() {
 
   # 迁移 AI 相关库与 CMake 配置文件
   mkdir -p "$INSTALL_AI/lib/cmake"
-  for lib_pattern in "libMLIR*" "libmlir_*" "libTorchMLIR*" "libtorch_mlir*" "libLLVM*" "libclang*" "liblld*"; do
+  for lib_pattern in "libMLIR*" "libmlir_*" "libTorchMLIR*" "libtorch_mlir*" "libTriton*" "libtriton*" "libLLVM*" "libclang*" "liblld*"; do
     for f in "$INSTALL_TOOLCHAIN/lib"/$lib_pattern; do
       if [ -f "$f" ] || [ -L "$f" ]; then
         mv -f "$f" "$INSTALL_AI/lib/" 2>/dev/null || true
@@ -65,7 +65,7 @@ step_prune() {
     done
   done
 
-  for cmake_dir in mlir torch-mlir llvm clang lld; do
+  for cmake_dir in mlir torch-mlir triton llvm clang lld; do
     if [ -d "$INSTALL_TOOLCHAIN/lib/cmake/$cmake_dir" ]; then
       rm -rf "$INSTALL_AI/lib/cmake/$cmake_dir"
       mv "$INSTALL_TOOLCHAIN/lib/cmake/$cmake_dir" "$INSTALL_AI/lib/cmake/"

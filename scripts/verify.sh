@@ -230,6 +230,25 @@ EOF
     fi
   fi
 
+  # --- 冒烟测试：triton (若启用/已安装) ---
+  local triton_opt_bin=""
+  for topt in "$INSTALL_AI/bin/triton-opt" "$INSTALL/bin/triton-opt"; do
+    if [ -x "$topt" ]; then triton_opt_bin="$topt"; break; fi
+  done
+  if [ -n "$triton_opt_bin" ]; then
+    echo "  正在执行 triton 冒烟测试 ($triton_opt_bin) ..."
+    "$triton_opt_bin" --version >/dev/null 2>&1 || die "triton-opt 无法执行"
+    cat > "$wd/triton_test.mlir" <<'EOF'
+module {
+  tt.func @triton_test(%arg0: i32) -> i32 {
+    tt.return %arg0 : i32
+  }
+}
+EOF
+    "$triton_opt_bin" "$wd/triton_test.mlir" -o "$wd/triton_test_opt.mlir" || die "triton-opt 解析基础 triton 方言失败"
+    ok "triton (triton-opt) 方言与工具链测试通过"
+  fi
+
   mark verify
   ok "验证全部通过"
 }

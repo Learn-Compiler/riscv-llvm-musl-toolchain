@@ -47,10 +47,10 @@ flowchart TD
     end
 
     subgraph Stage3["阶段三：扩展组件与验证 (Extensions & Verification)"]
-        TorchMLIR["5. (可选) 编译 torch-mlir 前端方言插件 (torch-mlir-opt)"]
+        AI_Plugins["5. (可选) 编译 AI 编译器组件:<br/>- torch-mlir (torch-mlir-opt)<br/>- triton (triton-opt / triton-lsp)"]
         Prune["6. 精简裁剪 & 生成便携配置 riscv64-unknown-linux-musl.cfg"]
-        Verify["7. 自动化冒烟测试 (C/C++ 纯静态、.cfg 默认链接、MLIR/torch-mlir 方言)"]
-        TorchMLIR --> Prune --> Verify
+        Verify["7. 自动化冒烟测试 (C/C++ 纯静态、.cfg 默认链接、MLIR/torch-mlir/Triton 方言)"]
+        AI_Plugins --> Prune --> Verify
     end
 
     H_Tools --> LLVM_Build
@@ -63,7 +63,7 @@ flowchart TD
                            │
                            ▼
   1. 【bootstrap】  本地工具链 0 秒探测接入（无外网依赖）
-  2. 【fetch】      源码检出与锁定 (LLVM 23.1.4 / Musl 1.2.5 / torch-mlir v20261001)
+  2. 【fetch】      源码检出与锁定 (LLVM 23.1.4 / Musl 1.2.5 / torch-mlir v20261001 / triton v3.2.0)
                            │
                            ▼
   3. 【llvm】       阶段一：用本地编译器构建 LLVM 23 核心交叉编译器本体
@@ -79,9 +79,9 @@ flowchart TD
                     └── ⑥ 编译目标 C++ 标准库: libc++.a (自动融合 libc++abi.a)
                            │
                            ▼
-  5. 【torch-mlir】 阶段三：编译 PyTorch 到 MLIR 前端方言插件 (torch-mlir-opt)
+  5. 【AI 编译器】   阶段三：编译 torch-mlir (torch-mlir-opt) 与 triton (triton-opt)
   6. 【prune】      精简无用工具，生成 riscv64-unknown-linux-musl.cfg 默认静态配置
-  7. 【verify】     全套自动化冒烟测试 (C/C++ 纯静态、.cfg 默认链接、MLIR/torch-mlir)
+  7. 【verify】     全套自动化冒烟测试 (C/C++ 纯静态、.cfg 默认链接、MLIR/torch-mlir/Triton)
 ```
 
 
@@ -130,14 +130,17 @@ flowchart TD
 ./build.sh --step runtimes     # 编排全套目标运行时流水线 (musl -> compiler-rt -> libc++)
 ./build.sh --step runtimes-rv32 # 独立为已有工具链增量构建 32 位全套运行时并生成双架构配置入口
 
-# 6. 灵活定制子项目、MLIR 与编译参数 (支持 torch-mlir 扩展)
+# 6. 灵活定制子项目、MLIR 与编译参数 (支持 torch-mlir 与 Triton 扩展)
 ./build.sh --enable-mlir                       # 启用 MLIR 子项目构建 (clang;lld;mlir)
 ./build.sh --enable-torch-mlir                 # 快捷启用 MLIR + torch-mlir 完整流水线构建
+./build.sh --enable-triton                     # 快捷启用 MLIR + Triton 完整流水线构建
 ./build.sh --projects "clang;lld;mlir" --debug # 自定义启用的 LLVM 子项目列表
 ./build.sh --targets "RISCV;X86"               # 自定义后端架构 (如增加 Host JIT 架构)
 ./build.sh --cmake-args "-DLLVM_BUILD_EXAMPLES=OFF" # 透传任意额外 CMake 参数
 ./build.sh --step torch-mlir                   # 单独编译 torch-mlir 组件 (自动对接 MLIR 与源码)
 ./build.sh --step torch-mlir --torch-mlir-src /path/to/torch-mlir # 挂载自定义 torch-mlir 源码
+./build.sh --step triton                       # 单独编译 Triton 组件 (自动对接 MLIR 与源码)
+./build.sh --step triton --triton-src /path/to/triton             # 挂载自定义 Triton 源码
 ./build.sh --llvm-src /path/to/custom-llvm     # 命令行直接挂载本地自研 LLVM 源码
 ./build.sh --musl-src /path/to/custom-musl     # 命令行直接挂载本地自研 Musl 源码
 
@@ -365,8 +368,8 @@ docker run --rm -v "$(pwd):/workspace" riscv-llvm-musl:latest ./build.sh --targe
   - **内容**：仅包含 `clang`、`lld`、标准 `llvm-*` 二进制工具、三元组别名软链接与便携 `.cfg` 文件；目标端 `libc++` 头文件与纯静态 `sysroot/`。
   - **无杂质**：彻底剔除宿主内部测试工具（`yaml-bench`、`UnicodeNameMappingGenerator` 等）与数百个宿主开发静态库（`libLLVM*.a`），避免头文件污染与空间膨胀。
 - **`install-ai/`**：
-  - **定位**：统一独立的 AI 编译器套件（MLIR 基础设施 + Torch-MLIR 前端）。
-  - **内容**：包含 `mlir-opt`、`torch-mlir-opt`、`mlir-translate`、`torch-mlir-lsp-server` 等全部 AI 编译工具、方言库（`libMLIR*.a`、`libTorchMLIR*.a`）与 C/C++ API 头文件。
+  - **定位**：统一独立的 AI 编译器套件（MLIR 基础设施 + Torch-MLIR 前端 + Triton 编译器）。
+  - **内容**：包含 `mlir-opt`、`torch-mlir-opt`、`triton-opt`、`triton-lsp`、`mlir-translate`、`torch-mlir-lsp-server` 等全部 AI 编译工具、方言库（`libMLIR*.a`、`libTorchMLIR*.a`、`libTriton*.a`、`libtriton.so`）与 C/C++ API 头文件。
   - **联合调试便利**：同目录部署使得从 PyTorch 算子下发到 MLIR 管道降级调试顺滑畅通：
     ```bash
     torch-mlir-opt input.mlir -torch-backend-to-linalg-on-tensors-backend-pipeline | mlir-opt -convert-linalg-to-loops
@@ -395,13 +398,14 @@ riscv-llvm-musl-toolchain/
 │   ├── lib/clang/23/             # compiler-rt (builtins/crt)
 │   └── sysroot/                  # 纯静态 Musl libc.a, Linux headers, crt*.o
 │
-├── install-ai/                   # 【AI 编译器】统一 MLIR 与 Torch-MLIR 产物
-│   ├── bin/                      # mlir-opt, torch-mlir-opt, mlir-translate, mlir-tblgen
-│   ├── include/                  # mlir/, mlir-c/, torch-mlir/ 方言头文件
-│   └── lib/                      # libMLIR*.a, libTorchMLIR*.a, cmake 导出
+├── install-ai/                   # 【AI 编译器】统一 MLIR、Torch-MLIR 与 Triton 产物
+│   ├── bin/                      # mlir-opt, torch-mlir-opt, triton-opt, triton-lsp, mlir-translate, mlir-tblgen
+│   ├── include/                  # mlir/, mlir-c/, torch-mlir/, triton/ 方言头文件
+│   └── lib/                      # libMLIR*.a, libTorchMLIR*.a, libTriton*.a, cmake 导出
 │
 ├── config/                       # 【配置层】纯声明式环境与目标配置
 │   ├── default.env               # 全局通用配置（版本、依赖 URL、自适应并发、ccache 开关）
+│   ├── versions.lock             # 官方发布版本锁定清单 (Single Source of Truth)
 │   ├── local.env.example         # 用户本地配置模板（可自由覆盖变量且被 Git 忽略）
 │   └── targets/                  # 目标平台配置目录
 │       ├── riscv64-linux-musl.env    # RISC-V 64 Musl 标准平台配置
@@ -412,6 +416,7 @@ riscv-llvm-musl-toolchain/
 │   ├── llvm/                     # LLVM 项目源码 (@ release/23.x，内含 compiler-rt 与 MLIR)
 │   ├── musl/                     # Musl C 库源码 (@ master / v1.2.6)
 │   ├── torch-mlir/               # torch-mlir 源码 (@ main)
+│   ├── triton/                   # triton 源码 (@ v3.2.0)
 │   └── linux-headers/            # Linux 内核 UAPI 头文件 (@ master / sabotage-linux)
 │
 ├── scripts/                      # 【执行层】模块化独立步骤流水线
@@ -420,7 +425,8 @@ riscv-llvm-musl-toolchain/
 │   ├── fetch.sh                  # 阶段 2：准备源码 (Submodule 更新或挂载本地源码) 并自动应用补丁
 │   ├── llvm.sh                   # 阶段 3：全量构建 LLVM 核心交叉编译器本体 (支持 ccache)
 │   ├── runtimes.sh               # 阶段 4：解耦编译全套目标运行时 (支持 musl, compiler-rt, libcxx)
-│   ├── torch_mlir.sh             # 阶段 5：配置并构建 torch-mlir 插件到 install-ai/
+│   ├── torch_mlir.sh             # 阶段 5a：配置并构建 torch-mlir 插件到 install-ai/
+│   ├── triton.sh                 # 阶段 5b：配置并构建 Triton 编译器到 install-ai/
 │   ├── prune.sh                  # 阶段 6：架构隔离修整、生成 .cfg 与 env.sh
 │   ├── verify.sh                 # 阶段 7：构建产物检查、C/C++/RVV 冒烟测试与 AI 联合管道测试
 │   └── package.sh                # 阶段 8：打包发布工具链与 AI 编译器 (tar.zst) 并计算 SHA256
@@ -441,4 +447,6 @@ riscv-llvm-musl-toolchain/
 | **LLVM** | [llvm/llvm-project](https://github.com/llvm/llvm-project.git) | `llvmorg-23.1.4` (`release/23.x`) | **官方最新发布主版本**，对 RVV 1.0 矢量扩展、Zba/Zbb/Zbc/Zicbo* 位操作与最新指令集提供最前沿的调度模型与优化 Pass，内建包含最新 MLIR 与 compiler-rt。 |
 | **Musl libc** | [kraj/musl](https://github.com/kraj/musl.git) | `v1.2.5` | Khem Raj 维护的 OpenEmbedded/Yocto musl 核心仓库，针对 RISC-V 架构系统调用与浮点 ABI 进行了交叉编译增强，全 64 位 `time_t`，代码极度精简易于无 GCC 自举。 |
 | **torch-mlir** | [llvm/torch-mlir](https://github.com/llvm/torch-mlir.git) | `v20261001` (`main`) | LLVM 官方 PyTorch 到 MLIR 前端编译器项目。作为 Git Submodule 纳入统一工程化管理，并支持通过 `--torch-mlir-src` 自由挂载本地开发分支。 |
+| **Triton** | [triton-lang/triton](https://github.com/triton-lang/triton.git) | `v3.2.0` (`main`) | 现代专用深度学习算子语言与 MLIR 编译器，输出高效 GPU/加速器算子，支持通过 `--triton-src` 挂载源码。 |
 | **linux-headers**| [sabotage-linux/kernel-headers](https://github.com/sabotage-linux/kernel-headers.git) | `master` (Git Submodule) | 面向 Musl libc 优化的轻量级 Linux 内核 UAPI 头文件仓库，专为 RISC-V 目标交叉编译适配，提供必要的系统调用与底层头文件。作为 Git Submodule 纳入 `third_party/linux-headers` 统一工程化管理。 |
+

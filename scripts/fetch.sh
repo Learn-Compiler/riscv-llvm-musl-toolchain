@@ -87,7 +87,7 @@ step_fetch() {
     ok "源码已就绪，跳过"
     return
   fi
-  log "准备源码 (版本锁定: LLVM:${LLVM_REF:-default} torch-mlir:${TORCH_MLIR_REF:-default} musl:${MUSL_REF:-default} linux-headers:${LINUX_HEADERS_REF:-default})"
+  log "准备源码 (版本锁定: LLVM:${LLVM_REF:-default} torch-mlir:${TORCH_MLIR_REF:-default} triton:${TRITON_REF:-default} musl:${MUSL_REF:-default} linux-headers:${LINUX_HEADERS_REF:-default})"
 
   # ---- 1. 准备 LLVM 源码 ----
   if [ -n "${LLVM_SRC:-}" ]; then
@@ -144,11 +144,29 @@ step_fetch() {
     fi
   fi
 
-  # ---- 5. 应用拓展补丁 ----
+  # ---- 5. 准备 triton 源码 (Git Submodule / 本地挂载) ----
+  if [ -n "${CLI_TRITON_SRC:-}" ]; then
+    log "使用本地挂载 triton 源码: $CLI_TRITON_SRC"
+    [ -f "$CLI_TRITON_SRC/CMakeLists.txt" ] || die "指定的 TRITON_SRC 缺少 CMakeLists.txt: $CLI_TRITON_SRC"
+    mkdir -p "$(dirname "$SRC/third_party/triton")"
+    ln -sfn "$CLI_TRITON_SRC" "$SRC/third_party/triton"
+  elif [ "${ENABLE_TRITON:-0}" = 1 ] || [ "${CLI_ENABLE_TRITON:-0}" = 1 ] || [ -d "$SRC/third_party/triton" ]; then
+    if [ -L "$SRC/third_party/triton" ]; then
+      warn "解除外部陈旧软链接: $SRC/third_party/triton"
+      rm -f "$SRC/third_party/triton"
+      rm -rf "$SRC/build-triton"
+    fi
+    checkout_repo_ref "$SRC/third_party/triton" "${TRITON_REPO:-https://github.com/triton-lang/triton.git}" "${TRITON_REF:-v3.2.0}" "CMakeLists.txt" "triton"
+  fi
+
+  # ---- 6. 应用拓展补丁 ----
   apply_patches "llvm" "$LLVM_DIR"
   apply_patches "musl" "$MUSL_DIR"
   if [ -d "$SRC/third_party/torch-mlir" ]; then
     apply_patches "torch-mlir" "$SRC/third_party/torch-mlir"
+  fi
+  if [ -d "$SRC/third_party/triton" ]; then
+    apply_patches "triton" "$SRC/third_party/triton"
   fi
   if [ -d "$LINUX_HEADERS_DIR" ]; then
     apply_patches "linux-headers" "$LINUX_HEADERS_DIR"
