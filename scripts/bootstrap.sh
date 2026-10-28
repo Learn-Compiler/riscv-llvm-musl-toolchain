@@ -164,6 +164,8 @@ step_bootstrap() {
     fi
     ln -sf "$BOOT/$CCACHE_TARBALL/ccache" "$BOOT/bin/ccache"
     ok "下载引导 ccache $("$BOOT/bin/ccache" --version | head -1)"
+  fi
+
   # ---- 6. meson (Picolibc 交叉编译依赖) ----
   local sys_meson
   sys_meson="$(find_system_binary meson || true)"
