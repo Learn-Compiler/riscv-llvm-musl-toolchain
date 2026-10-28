@@ -84,7 +84,7 @@ EOF
     --prefix="$SYSROOT" \
     -Dincludedir=include \
     -Dlibdir=lib \
-    -Dsysroot-install=true \
+    -Dsysroot-install=false \
     -Dsystem-libc=true \
     -Dpicocrt=true \
     -Dmultilib=true \
