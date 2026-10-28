@@ -125,6 +125,13 @@ step_compiler_rt() {
     fi
   done
 
+  # 编译并部署 riscv32 的 crtbegin.o 与 crtend.o
+  log "编译 riscv32 crtbegin.o 与 crtend.o"
+  "$target_clang" --target=riscv32-unknown-elf -march=rv32imac -mabi=ilp32 -c "$LLVM_DIR/compiler-rt/lib/builtins/crtbegin.c" -o "$inst_res_32/clang_rt.crtbegin.o"
+  "$target_clang" --target=riscv32-unknown-elf -march=rv32imac -mabi=ilp32 -c "$LLVM_DIR/compiler-rt/lib/builtins/crtend.c" -o "$inst_res_32/clang_rt.crtend.o"
+  cp -a "$inst_res_32/clang_rt.crtbegin.o" "$SYSROOT/lib/clang_rt.crtbegin.o"
+  cp -a "$inst_res_32/clang_rt.crtend.o" "$SYSROOT/lib/clang_rt.crtend.o"
+
   # 2. 编译并部署 riscv64-unknown-elf 的 builtins 与 crt
   ensure_compiler_rt_configured "riscv64-unknown-elf" "riscv64"
   local RUNTIMES_BUILD_64="${BUILD_RUNTIMES:-$SRC/build-runtimes}-riscv64-unknown-elf"
@@ -147,20 +154,37 @@ step_compiler_rt() {
     fi
   done
 
-  # 为每个已存在的 multilib 目录配置 builtins 软链接
-  for d in "$SYSROOT"/lib/rv32* "$SYSROOT"/lib/rv64*; do
-    if [ -d "$d" ]; then
-      if [[ "$(basename "$d")" == rv64* ]]; then
-        ln -sfn ../libclang_rt.builtins-riscv64.a "$d/libclang_rt.builtins.a" 2>/dev/null || true
-      else
-        ln -sfn ../libclang_rt.builtins-riscv32.a "$d/libclang_rt.builtins.a" 2>/dev/null || true
-      fi
-    fi
+  # 编译并部署 riscv64 的 crtbegin.o 与 crtend.o
+  log "编译 riscv64 crtbegin.o 与 crtend.o"
+  "$target_clang" --target=riscv64-unknown-elf -march=rv64gc -mabi=lp64d -c "$LLVM_DIR/compiler-rt/lib/builtins/crtbegin.c" -o "$inst_res_64/clang_rt.crtbegin.o"
+  "$target_clang" --target=riscv64-unknown-elf -march=rv64gc -mabi=lp64d -c "$LLVM_DIR/compiler-rt/lib/builtins/crtend.c" -o "$inst_res_64/clang_rt.crtend.o"
+
+  # 3. 部署 Clang resource-dir 下的标准化与 multilib 软链接 (支持 riscv*-unknown-unknown-elf)
+  local inst_uue_32="$INSTALL/lib/clang/$clang_ver/lib/riscv32-unknown-unknown-elf"
+  local inst_uue_64="$INSTALL/lib/clang/$clang_ver/lib/riscv64-unknown-unknown-elf"
+  mkdir -p "$inst_uue_32" "$inst_uue_64"
+  cp -a "$inst_res_32"/* "$inst_uue_32/" 2>/dev/null || true
+  cp -a "$inst_res_64"/* "$inst_uue_64/" 2>/dev/null || true
+
+  for v in rv32i/ilp32 rv32im/ilp32 rv32iac/ilp32 rv32imafc/ilp32f rv32imafdc/ilp32d; do
+    mkdir -p "$inst_uue_32/$v" "$SYSROOT/lib/$v"
+    ln -sfn ../../libclang_rt.builtins-riscv32.a "$inst_uue_32/$v/libclang_rt.builtins.a"
+    ln -sfn ../../clang_rt.crtbegin.o "$inst_uue_32/$v/clang_rt.crtbegin.o"
+    ln -sfn ../../clang_rt.crtend.o "$inst_uue_32/$v/clang_rt.crtend.o"
+    ln -sfn ../libclang_rt.builtins-riscv32.a "$SYSROOT/lib/$v/libclang_rt.builtins.a" 2>/dev/null || true
+  done
+
+  for v in rv64imac/lp64 rv64imafdc/lp64d; do
+    mkdir -p "$inst_uue_64/$v" "$SYSROOT/lib/$v"
+    ln -sfn ../../libclang_rt.builtins-riscv64.a "$inst_uue_64/$v/libclang_rt.builtins.a"
+    ln -sfn ../../clang_rt.crtbegin.o "$inst_uue_64/$v/clang_rt.crtbegin.o"
+    ln -sfn ../../clang_rt.crtend.o "$inst_uue_64/$v/clang_rt.crtend.o"
+    ln -sfn ../libclang_rt.builtins-riscv64.a "$SYSROOT/lib/$v/libclang_rt.builtins.a" 2>/dev/null || true
   done
 
   mark compiler_rt
   mark builtins
-  ok "compiler-rt builtins 运行库部署完成"
+  ok "compiler-rt builtins 与 crt 运行库部署完成"
 }
 
 # 统一目标端运行库构建

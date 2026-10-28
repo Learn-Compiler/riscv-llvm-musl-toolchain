@@ -167,6 +167,8 @@ EOF
   # 4. 生成多 march 矩阵的 multilib.yaml 映射清单
   log "生成 Multilib 架构矩阵清单 (multilib.yaml)"
   mkdir -p "$INSTALL/lib/clang-runtimes"
+  local clang_ver
+  clang_ver=$("$target_clang" -dumpversion 2>/dev/null | cut -d. -f1 || echo "23")
   local yaml_file="$SYSROOT/lib/multilib.yaml"
   cat > "$yaml_file" <<'YAML_EOF'
 MultilibVersion: 1.0
@@ -189,28 +191,33 @@ Variants:
   Flags: [-march=rv64imafdc, -mabi=lp64d]
 
 Mappings:
-- Match: -march=rv32i.*
-  Flags: [-march=rv32i]
-- Match: -march=rv32im_.*|-march=rv32im$
-  Flags: [-march=rv32im]
-- Match: -march=rv32iac.*
-  Flags: [-march=rv32iac]
-- Match: -march=rv32imac.*
-  Flags: [-march=rv32imac]
-- Match: -march=rv32imafc.*
-  Flags: [-march=rv32imafc]
-- Match: -march=rv32gc.*|-march=rv32imafdc.*
+- Match: -march=rv32i2p1.*_m2p0.*_a2p1.*_f2p2.*_d2p2.*
   Flags: [-march=rv32imafdc]
-- Match: -march=rv64imac.*
-  Flags: [-march=rv64imac]
-- Match: -march=rv64gc.*|-march=rv64imafdc.*
+- Match: -march=rv32i2p1.*_m2p0.*_a2p1.*_f2p2.*
+  Flags: [-march=rv32imafc]
+- Match: -march=rv32i2p1.*_m2p0.*_a2p1.*_c2p0.*
+  Flags: [-march=rv32imac]
+- Match: -march=rv32i2p1.*_a2p1.*_c2p0.*
+  Flags: [-march=rv32iac]
+- Match: -march=rv32i2p1.*_m2p0.*
+  Flags: [-march=rv32im]
+- Match: -march=rv32i2p1$
+  Flags: [-march=rv32i]
+- Match: -march=rv64i2p1.*_m2p0.*_a2p1.*_f2p2.*_d2p2.*
   Flags: [-march=rv64imafdc]
+- Match: -march=rv64i2p1.*_m2p0.*_a2p1.*_c2p0.*
+  Flags: [-march=rv64imac]
 YAML_EOF
+  cp -a "$yaml_file" "$SYSROOT/multilib.yaml"
   cp -a "$yaml_file" "$INSTALL/lib/clang-runtimes/multilib.yaml"
+  mkdir -p "$INSTALL/lib/clang/$clang_ver"
+  cp -a "$yaml_file" "$INSTALL/lib/clang/$clang_ver/multilib.yaml"
 
-  # 5. 确保双向目录兼容软链接 ($SYSROOT/<variant>/lib <-> $SYSROOT/lib/<variant>)
+  # 5. 配置 libgloss 别名软链接与双向目录兼容
+  ln -sfn libnosys.a "$SYSROOT/lib/libgloss.a" 2>/dev/null || true
   for v in rv32i/ilp32 rv32im/ilp32 rv32iac/ilp32 rv32imafc/ilp32f rv32imafdc/ilp32d rv64imac/lp64 rv64imafdc/lp64d; do
     if [ -d "$SYSROOT/lib/$v" ]; then
+      ln -sfn libnosys.a "$SYSROOT/lib/$v/libgloss.a" 2>/dev/null || true
       mkdir -p "$SYSROOT/$(dirname "$v")"
       if [ ! -e "$SYSROOT/$v" ]; then
         mkdir -p "$SYSROOT/$v"

@@ -121,6 +121,8 @@ step_prune() {
 --sysroot=<CFGDIR>/../${cfg_sysroot_rel}
 -fuse-ld=lld
 -rtlib=compiler-rt
+-T <CFGDIR>/../${cfg_sysroot_rel}/lib/picolibc.ld
+-Wno-unused-command-line-argument
 EOF
 
   if [ -n "${TARGET_EXTRA_CFLAGS:-}" ]; then
@@ -135,6 +137,8 @@ EOF
 --sysroot=<CFGDIR>/../${cfg_sysroot_rel}
 -fuse-ld=lld
 -rtlib=compiler-rt
+-T <CFGDIR>/../${cfg_sysroot_rel}/lib/picolibc.ld
+-Wno-unused-command-line-argument
 EOF
   ln -sfn riscv32-unknown-elf.cfg "$INSTALL_TOOLCHAIN/bin/riscv32.cfg"
   ln -sfn riscv32-unknown-elf.cfg "$INSTALL_TOOLCHAIN/bin/riscv32-elf.cfg"
@@ -145,6 +149,8 @@ EOF
 --sysroot=<CFGDIR>/../${cfg_sysroot_rel}
 -fuse-ld=lld
 -rtlib=compiler-rt
+-T <CFGDIR>/../${cfg_sysroot_rel}/lib/picolibc.ld
+-Wno-unused-command-line-argument
 EOF
   ln -sfn riscv64-unknown-elf.cfg "$INSTALL_TOOLCHAIN/bin/riscv64.cfg"
   ln -sfn riscv64-unknown-elf.cfg "$INSTALL_TOOLCHAIN/bin/riscv64-elf.cfg"
