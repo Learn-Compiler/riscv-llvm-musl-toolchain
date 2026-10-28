@@ -43,15 +43,16 @@ checkout_repo_ref() {
     fi
   fi
 
-  mkdir -p "$dest"
-  # 2. 检查是否为有效 git 仓库
-  if ! git -C "$dest" rev-parse --git-dir >/dev/null 2>&1; then
+  # 2. 检查是否为有效 git 仓库 (必须检查 dest 内部的 .git，避免误判上级工作区)
+  if [ ! -e "$dest/.git" ]; then
     echo "  初始化并检出 $name ($ref) ..."
+    rm -rf "$dest"
     if git clone --depth 1 --branch "$ref" "$repo" "$dest" 2>/dev/null; then
       echo "$ref" > "$dest/.git_checked_ref"
       ok "$name ($ref) 检出完成"
       return 0
     fi
+    mkdir -p "$dest"
     git init -q "$dest"
   fi
 
