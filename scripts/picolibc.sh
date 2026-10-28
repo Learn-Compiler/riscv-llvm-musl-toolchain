@@ -12,7 +12,6 @@ init_config
 get_target_tools() {
   target_clang="$INSTALL/bin/clang"
   target_ar="$INSTALL/bin/llvm-ar"
-  target_as="$INSTALL/bin/llvm-as"
   target_nm="$INSTALL/bin/llvm-nm"
   target_ranlib="$INSTALL/bin/llvm-ranlib"
   target_strip="$INSTALL/bin/llvm-strip"
@@ -55,7 +54,6 @@ step_picolibc() {
 [binaries]
 c = ['$target_clang', '--target=${TARGET_TRIPLE}', '-nostdlib']
 ar = '$target_ar'
-as = '$target_as'
 nm = '$target_nm'
 strip = '$target_strip'
 ranlib = '$target_ranlib'
@@ -133,7 +131,6 @@ EOF
 [binaries]
 c = ['$target_clang', '--target=${target_trip}', '-nostdlib']
 ar = '$target_ar'
-as = '$target_as'
 nm = '$target_nm'
 strip = '$target_strip'
 ranlib = '$target_ranlib'
