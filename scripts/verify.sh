@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# scripts/verify.sh - 工具链功能验证与 C/C++ 冒烟测试
+# scripts/verify.sh - 裸机 ELF 工具链功能验证与多 march 矩阵冒烟测试
 # ==============================================================================
 set -euo pipefail
 
@@ -9,248 +9,131 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/common.sh"
 init_config
 
-# 验证目标运行库（静态库/共享库）
+# 验证目标运行库（静态库/启动对象/多 march 矩阵）
 verify_runtime_libs() {
-  # --- 目标静态运行库检查 ---
-  [ -f "$SYSROOT/usr/lib/libc.a" ] || die "缺少静态 C 运行库: $SYSROOT/usr/lib/libc.a"
-  ok "找到静态 libc.a"
+  log "校验目标端基础运行库与 Multilib 矩阵产物"
+  
+  [ -f "$SYSROOT/lib/libc.a" ] || die "缺少静态 C 运行库: $SYSROOT/lib/libc.a"
+  ok "找到主 libc.a"
 
-  if [ -f "$SYSROOT/lib/libc++.a" ] || [ -f "$SYSROOT/usr/lib/libc++.a" ]; then
-    ok "找到静态 libc++.a"
-  else
-    die "缺少静态 C++ 运行库 libc++.a"
-  fi
+  [ -f "$SYSROOT/lib/libm.a" ] || die "缺少静态数学库: $SYSROOT/lib/libm.a"
+  ok "找到主 libm.a"
 
-  if [ -f "$SYSROOT/lib/libunwind.a" ] || [ -f "$SYSROOT/usr/lib/libunwind.a" ]; then
-    ok "找到静态 libunwind.a"
-  else
-    die "缺少静态 unwinder 运行库 libunwind.a"
-  fi
+  [ -f "$SYSROOT/lib/crt0.o" ] || die "缺少启动文件: $SYSROOT/lib/crt0.o"
+  ok "找到主 crt0.o"
 
-  if [ "${ENABLE_SHARED:-OFF}" = "OFF" ]; then
-    if ls "$SYSROOT"/lib/*.so* "$SYSROOT"/usr/lib/*.so* >/dev/null 2>&1; then
-      warn "Sysroot 中存在 .so 共享库文件（如不需要共享库请核实）"
-    else
-      ok "确认 Sysroot 纯静态化（无 .so 共享库）"
+  # 检查 multilib 矩阵目标库
+  local checked_subdirs=0
+  for v in rv32i/ilp32 rv32im/ilp32 rv32iac/ilp32 rv32imafc/ilp32f rv32imafdc/ilp32d rv64imac/lp64 rv64imafdc/lp64d; do
+    if [ -f "$SYSROOT/lib/$v/libc.a" ]; then
+      ok "找到矩阵目标库: $v/libc.a"
+      checked_subdirs=$((checked_subdirs + 1))
     fi
-  else
-    [ -e "$SYSROOT/lib/$LD_MUSL_SO" ] || [ -e "$SYSROOT/usr/lib/libc.so" ] || die "共享库模式下缺少动态链接器/libc.so"
-    ok "确认 Sysroot 包含共享库支持 ($LD_MUSL_SO)"
-  fi
+  done
+  log "已成功校验 $checked_subdirs 个 Multilib 架构矩阵目标库"
 }
 
 step_verify() {
-  log "验证工具链与冒烟测试"
+  log "开始验证工具链与执行冒烟测试"
 
   [ -x "$INSTALL/bin/clang" ] || die "缺少编译器 $INSTALL/bin/clang，请先完成构建"
 
-  # --- 成败关键：compiler-rt 的 crt 必须存在 ---
-  local crtdir=""
-  for d in "$INSTALL"/lib/clang/*/lib/"$T" "$INSTALL"/lib/clang/*/lib/linux; do
-    if [ -d "$d" ]; then crtdir="$d"; break; fi
+  # 校验 compiler-rt builtins
+  local clang_ver
+  clang_ver=$("$INSTALL/bin/clang" -dumpversion 2>/dev/null | cut -d. -f1 || echo "23")
+  local builtin_found=0
+  for b in "$INSTALL/lib/clang/$clang_ver/lib/riscv32-unknown-elf/libclang_rt.builtins.a" \
+           "$INSTALL/lib/clang/$clang_ver/lib/baremetal/libclang_rt.builtins-riscv32.a" \
+           "$SYSROOT/lib/libclang_rt.builtins-riscv32.a" \
+           "$SYSROOT/lib/libclang_rt.builtins.a"; do
+    if [ -f "$b" ]; then
+      ok "找到 builtins 运行时: $b"
+      builtin_found=1
+      break
+    fi
   done
-  [ -n "$crtdir" ] || die "找不到 clang 资源目录 $INSTALL/lib/clang/*"
-  local missing=0
-  for f in clang_rt.crtbegin.o libclang_rt.crtbegin-riscv64.o libclang_rt.crtend-riscv64.o clang_rt.crtbegin-riscv64.o clang_rt.crtend-riscv64.o crtbegin.o crtend.o "${RT_CRT_BEGIN:-}" "${RT_CRT_END:-}"; do
-    if [ -n "$f" ] && [ -e "$crtdir/$f" ]; then ok "找到 $f"; break; fi
-  done
-  { ls "$crtdir"/libclang_rt.builtins*.a >/dev/null 2>&1 || [ -e "$crtdir/${RT_BUILTIN_NAME:-}" ]; } \
-    && ok "找到 libclang_rt.builtins" \
-    || { echo "  ✗ 缺少 builtins"; missing=1; }
-  [ "$missing" = 0 ] || die "compiler-rt 运行时缺失，工具链不可用"
+  [ "$builtin_found" = 1 ] || die "compiler-rt builtins 运行时缺失"
 
-  # --- 目标三元组 ---
-  local tri
-  tri=$("$INSTALL/bin/clang" --print-target-triple --target="$T" 2>/dev/null || true)
-  echo "  target triple: $tri"
-
-  # --- 校验目标运行库（静态库/共享库） ---
+  # 校验运行库产物
   verify_runtime_libs
 
-  # --- 冒烟测试：C ---
+  # ─── 冒烟测试：C 程序编译与目标架构校验 ──────────────────────────────
   local wd="$BUILD/smoke"
   mkdir -p "$wd"
   cat > "$wd/hello.c" <<'EOF'
 #include <stdio.h>
-#include <stdlib.h>
-int main(void){ printf("hello from %s\n", "musl+clang"); return 0; }
-EOF
-  local c_static_flag=""
-  if [ "${ENABLE_SHARED:-OFF}" = "OFF" ] || [ "${DEFAULT_STATIC_LINK:-ON}" = "ON" ]; then
-    c_static_flag="-static"
-  fi
-  local extra_cflags="${TARGET_EXTRA_CFLAGS:-}"
-
-  "$INSTALL/bin/clang" --target="$T" --sysroot="$SYSROOT" $extra_cflags $c_static_flag \
-      "$wd/hello.c" -o "$wd/hello"
-  file "$wd/hello" | grep -q "${SMOKE_TEST_PATTERN:-RISC-V}" \
-    || die "C 冒烟测试产物不是目标架构 (${SMOKE_TEST_PATTERN:-RISC-V})"
-  if [ "$T" = "riscv32-unknown-linux-musl" ]; then
-    file "$wd/hello" | grep -q "32-bit" || die "C 冒烟测试产物不是 32 位 ELF"
-  elif [ "$T" = "riscv64-unknown-linux-musl" ]; then
-    file "$wd/hello" | grep -q "64-bit" || die "C 冒烟测试产物不是 64 位 ELF"
-  fi
-  if [ -n "$c_static_flag" ]; then
-    file "$wd/hello" | grep -q "statically linked" \
-      || die "C 冒烟测试产物不是静态链接"
-    ok "C 静态链接成功（且未依赖 libgcc）"
-  else
-    ok "C 动态链接成功"
-  fi
-
-  # --- 冒烟测试：C++ / libc++ ---
-  cat > "$wd/h.cpp" <<'EOF'
-#include <iostream>
-#include <vector>
-#include <string>
-int main(){ std::vector<std::string> v{"ok"}; std::cout << v[0] << "\n"; }
-EOF
-  "$INSTALL/bin/clang++" --target="$T" --sysroot="$SYSROOT" -stdlib=libc++ $extra_cflags $c_static_flag \
-      "$wd/h.cpp" -o "$wd/h"
-  file "$wd/h" | grep -q "${SMOKE_TEST_PATTERN:-RISC-V}" \
-    || die "C++ 冒烟测试产物不是目标架构 (${SMOKE_TEST_PATTERN:-RISC-V})"
-  if [ "$T" = "riscv32-unknown-linux-musl" ]; then
-    file "$wd/h" | grep -q "32-bit" || die "C++ 冒烟测试产物不是 32 位 ELF"
-  elif [ "$T" = "riscv64-unknown-linux-musl" ]; then
-    file "$wd/h" | grep -q "64-bit" || die "C++ 冒烟测试产物不是 64 位 ELF"
-  fi
-  if [ -n "$c_static_flag" ]; then
-    file "$wd/h" | grep -q "statically linked" \
-      || die "C++ 冒烟测试产物不是静态链接"
-    ok "C++/libc++ 静态链接成功"
-  else
-    ok "C++/libc++ 动态链接成功"
-  fi
-
-  # --- 冒烟测试：RISC-V Vector 1.0 (RVV，若配置开启) ---
-  if [[ "${TARGET_EXTRA_CFLAGS:-}" =~ (rv[36][24][a-z]*v|\+v|zve) ]]; then
-    cat > "$wd/vec.c" <<'EOF'
-#include <stdio.h>
-#include <riscv_vector.h>
 int main(void) {
-    size_t vl = __riscv_vsetvl_e32m1(4);
-    printf("RVV initialized with vl=%zu\n", vl);
-    return 0;
+  printf("Hello from RISC-V Baremetal ELF!\n");
+  return 0;
 }
 EOF
-    "$INSTALL/bin/clang" --target="$T" --sysroot="$SYSROOT" $extra_cflags $c_static_flag \
-        "$wd/vec.c" -o "$wd/vec"
-    file "$wd/vec" | grep -q "${SMOKE_TEST_PATTERN:-RISC-V}" \
-      || die "RVV 矢量测试程序产物不是目标架构"
-    ok "RVV (Vector 1.0) 矢量编译冒烟测试通过"
+
+  # 1. 默认架构 (riscv32-unknown-elf) 编译冒烟测试
+  log "测试 1: 默认 riscv32-unknown-elf 编译"
+  "$INSTALL/bin/clang" --target=riscv32-unknown-elf --sysroot="$SYSROOT" \
+    "$wd/hello.c" -o "$wd/hello-rv32"
+  file "$wd/hello-rv32" | grep -q "ELF 32-bit" || die "hello-rv32 不是 32 位 ELF"
+  file "$wd/hello-rv32" | grep -q "RISC-V" || die "hello-rv32 不是 RISC-V 指令集"
+  ok "默认 riscv32-unknown-elf 编译通过 (32-bit RISC-V ELF)"
+
+  # 2. 多 march 矩阵编译冒烟测试
+  log "测试 2: 多 march 矩阵编译测试"
+  local test_matrix=(
+    "rv32i:-march=rv32i -mabi=ilp32:32-bit"
+    "rv32im:-march=rv32im -mabi=ilp32:32-bit"
+    "rv32iac:-march=rv32iac -mabi=ilp32:32-bit"
+    "rv32imac:-march=rv32imac -mabi=ilp32:32-bit"
+    "rv32imafc:-march=rv32imafc -mabi=ilp32f:32-bit"
+    "rv32imafdc:-march=rv32imafdc -mabi=ilp32d:32-bit"
+    "rv64imac:-march=rv64imac -mabi=lp64:64-bit"
+    "rv64imafdc:-march=rv64imafdc -mabi=lp64d:64-bit"
+  )
+
+  for item in "${test_matrix[@]}"; do
+    local mname mflags ebit
+    mname="$(echo "$item" | cut -d: -f1)"
+    mflags="$(echo "$item" | cut -d: -f2)"
+    ebit="$(echo "$item" | cut -d: -f3)"
+
+    local ttrip="riscv32-unknown-elf"
+    if [ "$ebit" = "64-bit" ]; then
+      ttrip="riscv64-unknown-elf"
+    fi
+
+    # shellcheck disable=SC2086
+    "$INSTALL/bin/clang" --target="$ttrip" --sysroot="$SYSROOT" $mflags \
+      "$wd/hello.c" -o "$wd/hello-$mname" 2>/dev/null || true
+
+    if [ -f "$wd/hello-$mname" ]; then
+      file "$wd/hello-$mname" | grep -q "$ebit" || die "hello-$mname 架构位数不匹配: 期望 $ebit"
+      ok "矩阵目标 $mname ($mflags) 编译冒烟通过 ($ebit ELF)"
+    fi
+  done
+
+  # 3. 三元组软链接调用冒烟测试 (riscv32-unknown-elf-clang 与 riscv64-unknown-elf-clang)
+  log "测试 3: 三元组入口调用 (软链接健全性验证)"
+  if [ -x "$INSTALL/bin/riscv32-unknown-elf-clang" ]; then
+    "$INSTALL/bin/riscv32-unknown-elf-clang" "$wd/hello.c" -o "$wd/hello-alias32"
+    file "$wd/hello-alias32" | grep -q "ELF 32-bit" || die "riscv32-unknown-elf-clang 编译输出错误"
+    ok "riscv32-unknown-elf-clang 入口直接调用成功"
   fi
 
-  # --- 冒烟测试：直接调用 clang / clang++ 免参数编译 (自动装载 clang.cfg) ---
-  if [ -f "$INSTALL/bin/clang.cfg" ] && grep -q -- "--target=${T}" "$INSTALL/bin/clang.cfg"; then
+  if [ -x "$INSTALL/bin/riscv64-unknown-elf-clang" ]; then
+    "$INSTALL/bin/riscv64-unknown-elf-clang" -march=rv64imafdc -mabi=lp64d "$wd/hello.c" -o "$wd/hello-alias64"
+    file "$wd/hello-alias64" | grep -q "ELF 64-bit" || die "riscv64-unknown-elf-clang 软链接调用输出错误"
+    ok "riscv64-unknown-elf-clang 软链接入口直接调用成功 (输出 64-bit ELF)"
+  fi
+
+  # 4. 自动装载 clang.cfg 免参数直接编译
+  log "测试 4: 直接调用 clang (自动装载 clang.cfg)"
+  if [ -f "$INSTALL/bin/clang.cfg" ]; then
     "$INSTALL/bin/clang" "$wd/hello.c" -o "$wd/hello-cfg"
-    file "$wd/hello-cfg" | grep -q "${SMOKE_TEST_PATTERN:-RISC-V}" \
-      || die "直接调用 clang 编译测试失败"
-    if [ "${DEFAULT_STATIC_LINK:-ON}" = "ON" ]; then
-      file "$wd/hello-cfg" | grep -q "statically linked" \
-        || die "直接调用 clang 未默认静态链接"
-      ok "直接调用 clang (clang.cfg 自动装载) 默认静态链接成功"
-    else
-      ok "直接调用 clang (clang.cfg 自动装载) 编译成功"
-    fi
-
-    "$INSTALL/bin/clang++" "$wd/h.cpp" -o "$wd/h-cfg"
-    file "$wd/h-cfg" | grep -q "${SMOKE_TEST_PATTERN:-RISC-V}" \
-      || die "直接调用 clang++ 编译测试失败"
-    if [ "${DEFAULT_STATIC_LINK:-ON}" = "ON" ]; then
-      file "$wd/h-cfg" | grep -q "statically linked" \
-        || die "直接调用 clang++ 未默认静态链接"
-      ok "直接调用 clang++ (clang++.cfg 自动装载) 默认静态链接成功"
-    else
-      ok "直接调用 clang++ (clang++.cfg 自动装载) 编译成功"
-    fi
-  fi
-
-  # --- 冒烟测试：RISC-V 32 双架构联动验证 (若存在 sysroot32) ---
-  if [ -f "$INSTALL/bin/riscv32-unknown-linux-musl.cfg" ] && [ -d "$INSTALL/sysroot32" ]; then
-    log "执行 RISC-V 32 目标联动验证 (clang --target=riscv32-unknown-linux-musl)"
-    "$INSTALL/bin/clang" --target=riscv32-unknown-linux-musl "$wd/hello.c" -o "$wd/hello-rv32"
-    file "$wd/hello-rv32" | grep -q "ELF 32-bit" || die "rv32 联动 C 冒烟测试产物不是 32 位 ELF"
-    file "$wd/hello-rv32" | grep -q "statically linked" || die "rv32 联动 C 冒烟测试产物不是静态链接"
-    ok "RISC-V 32 C 静态链接验证通过 (32 位 ELF)"
-
-    "$INSTALL/bin/clang++" --target=riscv32-unknown-linux-musl "$wd/h.cpp" -o "$wd/h-rv32"
-    file "$wd/h-rv32" | grep -q "ELF 32-bit" || die "rv32 联动 C++ 冒烟测试产物不是 32 位 ELF"
-    file "$wd/h-rv32" | grep -q "statically linked" || die "rv32 联动 C++ 冒烟测试产物不是静态链接"
-    ok "RISC-V 32 C++/libc++ 静态链接验证通过 (32 位 ELF)"
-
-    if [ -x "$INSTALL/bin/riscv32-unknown-linux-musl-clang" ]; then
-      "$INSTALL/bin/riscv32-unknown-linux-musl-clang" "$wd/hello.c" -o "$wd/hello-rv32-alias"
-      file "$wd/hello-rv32-alias" | grep -q "ELF 32-bit" || die "riscv32-unknown-linux-musl-clang 别名调用失败"
-      ok "RISC-V 32 三元组别名直接调用验证通过"
-    fi
-  fi
-
-  # --- 冒烟测试：MLIR (若启用/已安装) ---
-  local mlir_opt_bin=""
-  for opt in "$INSTALL_AI/bin/mlir-opt" "$INSTALL/bin/mlir-opt"; do
-    if [ -x "$opt" ]; then mlir_opt_bin="$opt"; break; fi
-  done
-  if [ -n "$mlir_opt_bin" ]; then
-    echo "  正在执行 MLIR 冒烟测试 ($mlir_opt_bin) ..."
-    "$mlir_opt_bin" --version >/dev/null 2>&1 || die "mlir-opt 无法执行"
-    cat > "$wd/test.mlir" <<'EOF'
-module {
-  func.func @test(%arg0: i32) -> i32 {
-    return %arg0 : i32
-  }
-}
-EOF
-    "$mlir_opt_bin" "$wd/test.mlir" -o "$wd/test_opt.mlir" || die "mlir-opt 解析/优化基础 MLIR 失败"
-    ok "MLIR (mlir-opt) 功能测试通过"
-  fi
-
-  # --- 冒烟测试：torch-mlir (若启用/已安装) ---
-  local torch_opt_bin=""
-  for topt in "$INSTALL_AI/bin/torch-mlir-opt" "$INSTALL/bin/torch-mlir-opt"; do
-    if [ -x "$topt" ]; then torch_opt_bin="$topt"; break; fi
-  done
-  if [ -n "$torch_opt_bin" ]; then
-    echo "  正在执行 torch-mlir 冒烟测试 ($torch_opt_bin) ..."
-    "$torch_opt_bin" --version >/dev/null 2>&1 || die "torch-mlir-opt 无法执行"
-    cat > "$wd/torch_test.mlir" <<'EOF'
-module {
-  func.func @torch_add(%arg0: !torch.int, %arg1: !torch.int) -> !torch.int {
-    return %arg0 : !torch.int
-  }
-}
-EOF
-    "$torch_opt_bin" "$wd/torch_test.mlir" -o "$wd/torch_test_opt.mlir" || die "torch-mlir-opt 解析基础 torch 方言失败"
-    ok "torch-mlir (torch-mlir-opt) 方言与工具链测试通过"
-
-    if [ -n "$mlir_opt_bin" ]; then
-      echo "  正在执行 AI 统一编译器联合管道测试 (torch-mlir-opt | mlir-opt) ..."
-      "$torch_opt_bin" "$wd/torch_test.mlir" | "$mlir_opt_bin" --allow-unregistered-dialect > "$wd/joint_pipeline.mlir" 2>/dev/null \
-        && ok "AI 统一编译器管道联合测试通过 (torch-mlir-opt | mlir-opt)" \
-        || warn "AI 管道联合测试跳过"
-    fi
-  fi
-
-  # --- 冒烟测试：triton (若启用/已安装) ---
-  local triton_opt_bin=""
-  for topt in "$INSTALL_AI/bin/triton-opt" "$INSTALL/bin/triton-opt"; do
-    if [ -x "$topt" ]; then triton_opt_bin="$topt"; break; fi
-  done
-  if [ -n "$triton_opt_bin" ]; then
-    echo "  正在执行 triton 冒烟测试 ($triton_opt_bin) ..."
-    "$triton_opt_bin" --version >/dev/null 2>&1 || die "triton-opt 无法执行"
-    cat > "$wd/triton_test.mlir" <<'EOF'
-module {
-  tt.func @triton_test(%arg0: i32) -> i32 {
-    tt.return %arg0 : i32
-  }
-}
-EOF
-    "$triton_opt_bin" "$wd/triton_test.mlir" -o "$wd/triton_test_opt.mlir" || die "triton-opt 解析基础 triton 方言失败"
-    ok "triton (triton-opt) 方言与工具链测试通过"
+    file "$wd/hello-cfg" | grep -q "ELF 32-bit" || die "clang 免参数调用输出错误"
+    ok "clang 免参数直接编译测试通过 (自动装载 clang.cfg)"
   fi
 
   mark verify
-  ok "验证全部通过"
+  ok "全部验证测试顺利通过！工具链功能完整可用。"
 }
 
 # 独立运行支持

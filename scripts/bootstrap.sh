@@ -164,6 +164,27 @@ step_bootstrap() {
     fi
     ln -sf "$BOOT/$CCACHE_TARBALL/ccache" "$BOOT/bin/ccache"
     ok "下载引导 ccache $("$BOOT/bin/ccache" --version | head -1)"
+  # ---- 6. meson (Picolibc 交叉编译依赖) ----
+  local sys_meson
+  sys_meson="$(find_system_binary meson || true)"
+  if [ -z "$sys_meson" ] && [ -x "$HOME/.local/bin/meson" ]; then
+    sys_meson="$HOME/.local/bin/meson"
+  fi
+  if [ -n "$sys_meson" ]; then
+    ln -sf "$sys_meson" "$BOOT/bin/meson"
+    ok "使用 meson ($("$sys_meson" --version))"
+  else
+    if command -v python3 >/dev/null 2>&1; then
+      log "检测到未安装 meson，尝试通过 pip 引导安装..."
+      python3 -m pip install --break-system-packages --user meson >/dev/null 2>&1 || python3 -m pip install --user meson >/dev/null 2>&1 || true
+      if [ -x "$HOME/.local/bin/meson" ]; then
+        ln -sf "$HOME/.local/bin/meson" "$BOOT/bin/meson"
+        ok "成功安装并接入 meson ($("$HOME/.local/bin/meson" --version))"
+      fi
+    fi
+    if [ ! -x "$BOOT/bin/meson" ]; then
+      warn "未检测到 meson，picolibc 构建阶段需要 meson (请运行: pip install --user meson 或 apt install -y meson)"
+    fi
   fi
 
   mark bootstrap

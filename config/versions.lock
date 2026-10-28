@@ -1,36 +1,13 @@
 # ==============================================================================
-# config/versions.lock - 官方发行版本清单 (Release 发布版本基准)
+# config/versions.lock - 官方发行版本清单 (LLVM ELF + Picolibc 发布基准)
 # ==============================================================================
-# 本文件为工具链核心三元组版本绑定的单一事实来源 (Single Source of Truth)。
-# 统一采用官方发行版发布分支 (Release Branch) 或正式发布标签 (Release Tag)，
-# 不使用任何生涩的 40 位 Git Commit SHA。
+# 本分支为专注于 RISC-V 裸机 Baremetal ELF 的 LLVM + Picolibc 交叉编译工具链。
+# 版本严格遵守 Learn-Compiler/riscv-gnu-toolchain master 分支的 submodule 锁定版本。
 #
-# 支持格式:
-#   - LLVM: release/23.x (推荐), llvmorg-23.1.3, 或 release/21.x (21.1 稳定线)
-#   - torch-mlir: v20261001 (官方正式 Release Tag) 或 main
-#   - musl: v1.2.5 (官方稳定 Release Tag)
-#
-# 命令行随时覆盖:
-#   ./build.sh --llvm-version release/23.x --torch-mlir-version v20261001
-# ==============================================================================
+# 1. LLVM 核心版本 (对齐 Learn-Compiler/riscv-gnu-toolchain 仓库 master 分支)
+LLVM_REF="${LLVM_REF:-ea7d852a70e8bdfaf601d6626a760f9771b2c4b4}"
+LLVM_REPO="${LLVM_REPO:-git@github.com:Learn-Compiler/llvm-project.git}"
 
-# 1. LLVM 核心版本 (官方正式发布分支/标签)
-LLVM_REF="${LLVM_REF:-llvmorg-23.1.4}"
-LLVM_REPO="${LLVM_REPO:-https://github.com/llvm/llvm-project.git}"
-
-# 2. torch-mlir 核心版本 (官方正式发布标签)
-TORCH_MLIR_REF="${TORCH_MLIR_REF:-v20261001}"
-TORCH_MLIR_REPO="${TORCH_MLIR_REPO:-https://github.com/llvm/torch-mlir.git}"
-
-# 3. 目标端 Musl C 运行库 (稳定发布标签)
-MUSL_REF="${MUSL_REF:-v1.2.5}"
-MUSL_REPO="${MUSL_REPO:-https://github.com/kraj/musl.git}"
-
-# 4. Linux 内核 UAPI 头文件
-LINUX_HEADERS_REF="${LINUX_HEADERS_REF:-master}"
-LINUX_HEADERS_REPO="${LINUX_HEADERS_REPO:-https://github.com/sabotage-linux/kernel-headers.git}"
-
-# 5. Triton 核心版本 (官方正式发布标签)
-TRITON_REF="${TRITON_REF:-v3.2.0}"
-TRITON_REPO="${TRITON_REPO:-https://github.com/triton-lang/triton.git}"
-
+# 2. 目标端 Picolibc C 运行库 (对齐 Learn-Compiler/riscv-gnu-toolchain 仓库 master 分支)
+PICOLIBC_REF="${PICOLIBC_REF:-2ae376c6cdf4fef90ca2388ecf7a07457fa63cff}"
+PICOLIBC_REPO="${PICOLIBC_REPO:-git@github.com:Learn-Compiler/picolibc.git}"

@@ -49,7 +49,7 @@ die()  { printf '\n%s!! %s%s\n' "$c_er" "$*" "$c_off" >&2; exit 1; }
 is_done() {
   local name="$1"
   case "$name" in
-    musl|compiler_rt|builtins|libcxx|libc++|runtimes|verify|package)
+    picolibc|musl|compiler_rt|builtins|libcxx|libc++|runtimes|verify|package)
       [ -f "$STAMPS/${name}_${TARGET:-default}" ] || [ -f "$STAMPS/${TARGET:-default}/$name" ]
       ;;
     *)
@@ -61,7 +61,7 @@ mark() {
   local name="$1"
   mkdir -p "$STAMPS"
   case "$name" in
-    musl|compiler_rt|builtins|libcxx|libc++|runtimes|verify|package)
+    picolibc|musl|compiler_rt|builtins|libcxx|libc++|runtimes|verify|package)
       mkdir -p "$STAMPS/${TARGET:-default}"
       date '+%F %T' > "$STAMPS/${name}_${TARGET:-default}"
       date '+%F %T' > "$STAMPS/${TARGET:-default}/$name"
@@ -74,7 +74,7 @@ mark() {
 unmark() {
   local name="$1"
   case "$name" in
-    musl|compiler_rt|builtins|libcxx|libc++|runtimes|verify|package)
+    picolibc|musl|compiler_rt|builtins|libcxx|libc++|runtimes|verify|package)
       rm -f "$STAMPS/${name}_${TARGET:-default}" "$STAMPS/${TARGET:-default}/$name" "$STAMPS/$name"
       ;;
     *)
@@ -153,21 +153,18 @@ init_config() {
   fi
 
   # 4. 载入目标平台配置 (支持标准化与常用别名转换)
-  TARGET="${TARGET:-riscv64-linux-musl}"
+  TARGET="${TARGET:-riscv32-unknown-elf}"
   case "$TARGET" in
-    riscv32|rv32|riscv32-linux-musl|riscv32-unknown-linux-musl)
-      TARGET="riscv32-linux-musl"
+    riscv32|rv32|riscv32-elf|riscv32-unknown-elf)
+      TARGET="riscv32-unknown-elf"
       ;;
-    riscv64|rv64|riscv64-linux-musl|riscv64-unknown-linux-musl)
-      TARGET="riscv64-linux-musl"
-      ;;
-    riscv64-rvv|rv64-rvv|riscv64-linux-musl-rvv)
-      TARGET="riscv64-linux-musl-rvv"
+    riscv64|rv64|riscv64-elf|riscv64-unknown-elf)
+      TARGET="riscv64-unknown-elf"
       ;;
   esac
   local target_conf="$SRC/config/targets/${TARGET}.env"
   if [ -f "$target_conf" ]; then
-    unset TARGET_TRIPLE T LLVM_TARGET_ARCH MUSL_TARGET RT_BUILTIN_NAME RT_CRT_BEGIN RT_CRT_END LD_MUSL_SO SMOKE_TEST_PATTERN PACKAGE_NAME TARGET_EXTRA_CFLAGS
+    unset TARGET_TRIPLE T LLVM_TARGET_ARCH RT_BUILTIN_NAME RT_CRT_BEGIN RT_CRT_END SMOKE_TEST_PATTERN PACKAGE_NAME TARGET_EXTRA_CFLAGS MULTILIB_MATRIX
     # shellcheck disable=SC1091
     source "$target_conf"
   else
@@ -177,29 +174,14 @@ init_config() {
   # 目标平台特定的 Sysroot 与 build-runtimes 目录自适应推导
   INSTALL_TOOLCHAIN="${INSTALL_TOOLCHAIN:-${INSTALL:-$SRC/install-toolchain}}"
   INSTALL="${INSTALL_TOOLCHAIN}"
-  if [ -z "${CLI_SYSROOT:-}" ] && [ -z "${SYSROOT_OVERRIDDEN:-}" ]; then
-    if [ "$TARGET" = "riscv32-linux-musl" ]; then
-      # 若主 sysroot 已存在且为 64 位目标，则 rv32 运行时独立安装至 sysroot32
-      if [ -f "$INSTALL/sysroot/usr/lib/crt1.o" ] && file "$INSTALL/sysroot/usr/lib/crt1.o" 2>/dev/null | grep -q "64-bit"; then
-        SYSROOT="$INSTALL/sysroot32"
-      elif [ -d "$INSTALL/sysroot32" ] && [ ! -L "$INSTALL/sysroot32" ]; then
-        SYSROOT="$INSTALL/sysroot32"
-      else
-        SYSROOT="$INSTALL/sysroot"
-      fi
-    else
-      SYSROOT="$INSTALL/sysroot"
-    fi
-  elif [ -n "${CLI_SYSROOT:-}" ]; then
+  if [ -n "${CLI_SYSROOT:-}" ]; then
     SYSROOT="$CLI_SYSROOT"
+  else
+    SYSROOT="${SYSROOT:-$INSTALL/sysroot}"
   fi
 
   if [ -z "${BUILD_RUNTIMES_OVERRIDDEN:-}" ]; then
-    if [ "$TARGET" = "riscv32-linux-musl" ]; then
-      BUILD_RUNTIMES="$SRC/build-runtimes-riscv32"
-    else
-      BUILD_RUNTIMES="$SRC/build-runtimes"
-    fi
+    BUILD_RUNTIMES="$SRC/build-runtimes"
   fi
 
   # 5. 载入已探测持久化的宿主编译器编译参数（若已探测）
