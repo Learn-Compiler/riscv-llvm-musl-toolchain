@@ -213,16 +213,32 @@ YAML_EOF
   mkdir -p "$INSTALL/lib/clang/$clang_ver"
   cp -a "$yaml_file" "$INSTALL/lib/clang/$clang_ver/multilib.yaml"
 
-  # 5. 配置 libgloss 别名软链接与双向目录兼容
-  ln -sfn libnosys.a "$SYSROOT/lib/libgloss.a" 2>/dev/null || true
+  # 5. 生成 composite libgloss.a (包含 libnosys.a 与 libdummyhost.a) 与双向架构目录兼容软链接
+  create_libgloss() {
+    local dir="$1"
+    if [ -f "$dir/libnosys.a" ] && [ -f "$dir/libdummyhost.a" ]; then
+      local mri="$dir/create_libgloss.mri"
+      cat > "$mri" <<MRI_EOF
+CREATE $dir/libgloss.a
+ADDLIB $dir/libnosys.a
+ADDLIB $dir/libdummyhost.a
+SAVE
+END
+MRI_EOF
+      "$target_ar" -M < "$mri" >/dev/null 2>&1 || true
+      rm -f "$mri"
+    else
+      ln -sfn libnosys.a "$dir/libgloss.a" 2>/dev/null || true
+    fi
+  }
+
+  create_libgloss "$SYSROOT/lib"
   for v in rv32i/ilp32 rv32im/ilp32 rv32iac/ilp32 rv32imafc/ilp32f rv32imafdc/ilp32d rv64imac/lp64 rv64imafdc/lp64d; do
     if [ -d "$SYSROOT/lib/$v" ]; then
-      ln -sfn libnosys.a "$SYSROOT/lib/$v/libgloss.a" 2>/dev/null || true
-      mkdir -p "$SYSROOT/$(dirname "$v")"
-      if [ ! -e "$SYSROOT/$v" ]; then
-        mkdir -p "$SYSROOT/$v"
-        ln -sfn "../../lib/$v" "$SYSROOT/$v/lib"
-      fi
+      create_libgloss "$SYSROOT/lib/$v"
+      mkdir -p "$SYSROOT/$(dirname "$v")" "$SYSROOT/$v"
+      ln -sfn "../../include" "$SYSROOT/$v/include"
+      ln -sfn "../../lib/$v" "$SYSROOT/$v/lib"
     fi
   done
 

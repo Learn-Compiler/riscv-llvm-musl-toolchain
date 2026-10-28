@@ -102,12 +102,10 @@ EOF
 
     # shellcheck disable=SC2086
     "$INSTALL/bin/clang" --target="$ttrip" --sysroot="$SYSROOT" $mflags \
-      "$wd/hello.c" -o "$wd/hello-$mname" 2>/dev/null || true
-
-    if [ -f "$wd/hello-$mname" ]; then
-      file "$wd/hello-$mname" | grep -q "$ebit" || die "hello-$mname 架构位数不匹配: 期望 $ebit"
-      ok "矩阵目标 $mname ($mflags) 编译冒烟通过 ($ebit ELF)"
-    fi
+      "$wd/hello.c" -o "$wd/hello-$mname"
+    [ -f "$wd/hello-$mname" ] || die "矩阵目标 $mname ($mflags) 编译测试产物缺失"
+    file "$wd/hello-$mname" | grep -q "$ebit" || die "hello-$mname 架构位数不匹配: 期望 $ebit"
+    ok "矩阵目标 $mname ($mflags) 编译冒烟通过 ($ebit ELF)"
   done
 
   # 3. 三元组软链接调用冒烟测试 (riscv32-unknown-elf-clang 与 riscv64-unknown-elf-clang)
