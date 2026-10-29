@@ -130,6 +130,32 @@ EOF
     ok "clang 免参数直接编译测试通过 (自动装载 clang.cfg)"
   fi
 
+  # 5. Compiler-RT 运行时 64 位整数运算与浮点 ABI 一致性校验
+  log "测试 5: Compiler-RT 运行时 64 位整数运算与浮点 ABI 一致性校验"
+  cat > "$wd/test_div.c" <<'EOF'
+#include <stdint.h>
+volatile int64_t a = 123456789012345LL;
+volatile int64_t b = 987654321LL;
+int main(void) {
+  volatile int64_t c = a / b;
+  return (int)c;
+}
+EOF
+  for mabi_item in "rv32imafc:-march=rv32imafc -mabi=ilp32f:riscv32-unknown-elf" \
+                   "rv32imafdc:-march=rv32imafdc -mabi=ilp32d:riscv32-unknown-elf" \
+                   "rv64imac:-march=rv64imac -mabi=lp64:riscv64-unknown-elf" \
+                   "rv64imafdc:-march=rv64imafdc -mabi=lp64d:riscv64-unknown-elf"; do
+    local vname vflags vtrip
+    vname="$(echo "$mabi_item" | cut -d: -f1)"
+    vflags="$(echo "$mabi_item" | cut -d: -f2)"
+    vtrip="$(echo "$mabi_item" | cut -d: -f3)"
+    # shellcheck disable=SC2086
+    "$INSTALL/bin/clang" --target="$vtrip" --sysroot="$SYSROOT" $vflags \
+      "$wd/test_div.c" -o "$wd/test_div-$vname"
+    [ -f "$wd/test_div-$vname" ] || die "Builtin 运算测试目标 $vname 缺失"
+    ok "Builtin 运算与 ABI 兼容性验证通过: $vname ($vflags)"
+  done
+
   mark verify
   ok "全部验证测试顺利通过！工具链功能完整可用。"
 }

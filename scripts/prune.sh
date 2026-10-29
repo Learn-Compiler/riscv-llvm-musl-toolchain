@@ -119,6 +119,7 @@ step_prune() {
   cat > "$INSTALL_TOOLCHAIN/bin/clang.cfg" <<EOF
 --target=riscv32-unknown-elf
 --sysroot=<CFGDIR>/../${cfg_sysroot_rel}
+-march=rv32imac -mabi=ilp32
 -fuse-ld=lld
 -rtlib=compiler-rt
 -T <CFGDIR>/../${cfg_sysroot_rel}/lib/picolibc.ld
@@ -135,6 +136,7 @@ EOF
   cat > "$INSTALL_TOOLCHAIN/bin/riscv32-unknown-elf.cfg" <<EOF
 --target=riscv32-unknown-elf
 --sysroot=<CFGDIR>/../${cfg_sysroot_rel}
+-march=rv32imac -mabi=ilp32
 -fuse-ld=lld
 -rtlib=compiler-rt
 -T <CFGDIR>/../${cfg_sysroot_rel}/lib/picolibc.ld
@@ -142,11 +144,15 @@ EOF
 EOF
   ln -sfn riscv32-unknown-elf.cfg "$INSTALL_TOOLCHAIN/bin/riscv32.cfg"
   ln -sfn riscv32-unknown-elf.cfg "$INSTALL_TOOLCHAIN/bin/riscv32-elf.cfg"
+  ln -sfn riscv32-unknown-elf.cfg "$INSTALL_TOOLCHAIN/bin/riscv32-unknown-elf-clang.cfg"
+  ln -sfn riscv32-unknown-elf.cfg "$INSTALL_TOOLCHAIN/bin/riscv32-unknown-unknown-elf-clang.cfg"
+  ln -sfn riscv32-unknown-elf.cfg "$INSTALL_TOOLCHAIN/bin/riscv32-unknown-unknown-elf.cfg"
 
   # riscv64-unknown-elf.cfg (支持 64 位三元组直接调用)
   cat > "$INSTALL_TOOLCHAIN/bin/riscv64-unknown-elf.cfg" <<EOF
 --target=riscv64-unknown-elf
 --sysroot=<CFGDIR>/../${cfg_sysroot_rel}
+-march=rv64imafdc -mabi=lp64d
 -fuse-ld=lld
 -rtlib=compiler-rt
 -T <CFGDIR>/../${cfg_sysroot_rel}/lib/picolibc.ld
@@ -154,6 +160,9 @@ EOF
 EOF
   ln -sfn riscv64-unknown-elf.cfg "$INSTALL_TOOLCHAIN/bin/riscv64.cfg"
   ln -sfn riscv64-unknown-elf.cfg "$INSTALL_TOOLCHAIN/bin/riscv64-elf.cfg"
+  ln -sfn riscv64-unknown-elf.cfg "$INSTALL_TOOLCHAIN/bin/riscv64-unknown-elf-clang.cfg"
+  ln -sfn riscv64-unknown-elf.cfg "$INSTALL_TOOLCHAIN/bin/riscv64-unknown-unknown-elf-clang.cfg"
+  ln -sfn riscv64-unknown-elf.cfg "$INSTALL_TOOLCHAIN/bin/riscv64-unknown-unknown-elf.cfg"
 
   # ─── 5. 生成统一环境激活脚本 env.sh ──────────────────────────────────
   cat > "$SRC/env.sh" <<'ENV_EOF'

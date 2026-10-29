@@ -103,14 +103,6 @@ CLI_STRIP_SYMBOLS=""
 CLI_ENABLE_SHARED=""
 CLI_DEFAULT_STATIC_LINK=""
 CLI_LLVM_PROJECTS=""
-CLI_ENABLE_MLIR=0
-CLI_ENABLE_TORCH_MLIR=0
-CLI_ENABLE_TRITON=0
-CLI_LLVM_REF=""
-CLI_TORCH_MLIR_REF=""
-CLI_TRITON_REF=""
-CLI_MUSL_REF=""
-CLI_STRICT_VERSIONS=0
 CLI_LLVM_TARGETS=""
 CLI_LLVM_RUNTIMES=""
 CLI_LLVM_EXTRA_CMAKE_ARGS=()
@@ -321,13 +313,8 @@ while [ $# -gt 0 ]; do
       CLI_INSTALL_TOOLCHAIN="$2"
       shift 2
       ;;
-    --install-ai)
-      [ -n "${2:-}" ] || die "$1 需要指定目录"
-      CLI_INSTALL_AI="$2"
-      shift 2
-      ;;
     --target)
-      [ -n "${2:-}" ] || die "--target 需要指定目标名称 (如 riscv32-unknown-linux-musl, riscv64-linux-musl)"
+      [ -n "${2:-}" ] || die "--target 需要指定目标名称 (默认: riscv32-unknown-elf)"
       CLI_TARGET="$2"
       shift 2
       ;;
@@ -339,10 +326,6 @@ while [ $# -gt 0 ]; do
       CLI_TARGET="riscv64-unknown-elf"
       shift
       ;;
-    --multilib-rv32|--enable-rv32|--with-rv32)
-      CLI_ENABLE_RV32=1
-      shift
-      ;;
     --sysroot)
       [ -n "${2:-}" ] || die "$1 需要指定 sysroot 路径"
       CLI_SYSROOT="$2"
@@ -350,13 +333,13 @@ while [ $# -gt 0 ]; do
       ;;
     --clean)
       log "清理构建缓存与时间戳 ..."
-      rm -rf "$STAMPS" "$BUILD" "$SRC/build-compiler-rt" "$SRC/build-runtimes" "$SRC/build-runtimes-riscv32" "$SRC/build-torch-mlir" "$SRC/build-triton" "${INSTALL_TOOLCHAIN:-$INSTALL}" "${INSTALL_AI:-$SRC/install-ai}" "$SRC/install-clang-musl" "$SRC/env.sh" "$SHIM"
+      rm -rf "$STAMPS" "$BUILD" "$SRC/build-compiler-rt"* "$SRC/build-runtimes"* "$SRC/build-picolibc"* "${INSTALL_TOOLCHAIN:-$INSTALL}" "$SRC/env.sh"
       ok "清理完成"
       exit 0
       ;;
     --clean-all)
       log "完全清理构建缓存与引导环境 ..."
-      rm -rf "$STAMPS" "$BUILD" "$SRC/build-compiler-rt" "$SRC/build-runtimes" "$SRC/build-runtimes-riscv32" "$SRC/build-torch-mlir" "$SRC/build-triton" "${INSTALL_TOOLCHAIN:-$INSTALL}" "${INSTALL_AI:-$SRC/install-ai}" "$SRC/install-clang-musl" "$SRC/env.sh" "$SHIM" "$BOOT"
+      rm -rf "$STAMPS" "$BUILD" "$SRC/build-compiler-rt"* "$SRC/build-runtimes"* "$SRC/build-picolibc"* "${INSTALL_TOOLCHAIN:-$INSTALL}" "$SRC/env.sh" "$BOOT"
       ok "全部清理完成"
       exit 0
       ;;
@@ -373,7 +356,6 @@ init_config
 [ -n "$CLI_JOBS" ]                && JOBS="$CLI_JOBS"
 [ -n "$CLI_ENABLE_CCACHE" ]       && ENABLE_CCACHE="$CLI_ENABLE_CCACHE"
 [ -n "${CLI_INSTALL_TOOLCHAIN:-}" ] && { INSTALL_TOOLCHAIN="$CLI_INSTALL_TOOLCHAIN"; INSTALL="$CLI_INSTALL_TOOLCHAIN"; }
-[ -n "${CLI_INSTALL_AI:-}" ]        && INSTALL_AI="$CLI_INSTALL_AI"
 [ -n "$CLI_BUILD_TYPE" ]          && BUILD_TYPE="$CLI_BUILD_TYPE"
 [ -n "$CLI_RUNTIMES_BUILD_TYPE" ] && RUNTIMES_BUILD_TYPE="$CLI_RUNTIMES_BUILD_TYPE"
 [ -n "$CLI_RUNTIMES_OPT_LEVEL" ]   && RUNTIMES_OPT_LEVEL="$CLI_RUNTIMES_OPT_LEVEL"
@@ -384,31 +366,13 @@ init_config
 [ -n "$CLI_LLVM_SRC" ]            && LLVM_SRC="$CLI_LLVM_SRC"
 [ -n "$CLI_PICOLIBC_SRC" ]        && PICOLIBC_SRC="$CLI_PICOLIBC_SRC"
 [ -n "${CLI_PICOLIBC_REF:-}" ]    && PICOLIBC_REF="$CLI_PICOLIBC_REF"
+[ -n "${CLI_LLVM_REF:-}" ]        && LLVM_REF="$CLI_LLVM_REF"
 
 # 编译参数灵活覆盖与扩展
 [ -n "$CLI_LLVM_PROJECTS" ]       && LLVM_ENABLE_PROJECTS="$CLI_LLVM_PROJECTS"
 [ -n "$CLI_LLVM_TARGETS" ]        && LLVM_TARGETS_TO_BUILD="$CLI_LLVM_TARGETS"
 [ -n "$CLI_LLVM_RUNTIMES" ]       && LLVM_ENABLE_RUNTIMES="$CLI_LLVM_RUNTIMES"
 
-# 若显式指定 --enable-mlir、--enable-torch-mlir 或 --enable-triton，确保 mlir 被加入到 LLVM_ENABLE_PROJECTS 中
-if [ "$CLI_ENABLE_MLIR" = 1 ] || [ "${CLI_ENABLE_TORCH_MLIR:-0}" = 1 ] || [ "${CLI_ENABLE_TRITON:-0}" = 1 ]; then
-  if [[ ";${LLVM_ENABLE_PROJECTS};" != *";mlir;"* ]]; then
-    LLVM_ENABLE_PROJECTS="${LLVM_ENABLE_PROJECTS};mlir"
-  fi
-  ENABLE_MLIR=1
-fi
-if [ "${CLI_ENABLE_TORCH_MLIR:-0}" = 1 ]; then
-  ENABLE_TORCH_MLIR=1
-fi
-if [ "${CLI_ENABLE_TRITON:-0}" = 1 ]; then
-  ENABLE_TRITON=1
-fi
-[ -n "${CLI_LLVM_REF:-}" ]       && LLVM_REF="$CLI_LLVM_REF"
-[ -n "${CLI_TORCH_MLIR_REF:-}" ] && TORCH_MLIR_REF="$CLI_TORCH_MLIR_REF"
-[ -n "${CLI_TRITON_REF:-}" ]     && TRITON_REF="$CLI_TRITON_REF"
-[ -n "${CLI_MUSL_REF:-}" ]       && MUSL_REF="$CLI_MUSL_REF"
-[ -n "${CLI_LINUX_HEADERS_REF:-}" ] && LINUX_HEADERS_REF="$CLI_LINUX_HEADERS_REF"
-[ "${CLI_STRICT_VERSIONS:-0}" = 1 ] && STRICT_VERSIONS=1
 
 # 拼接额外的 CMake 与 Musl 参数
 if [ ${#CLI_LLVM_EXTRA_CMAKE_ARGS[@]} -gt 0 ]; then
@@ -461,11 +425,10 @@ if [ -f "$SRC/third_party/llvm/.git_checked_ref" ]; then
     unmark fetch
     unmark builtins
     unmark llvm
-    unmark torch_mlir
-    unmark triton
+    unmark compiler_rt
+    unmark runtimes
     unmark prune
     unmark verify
-    rm -rf "$SRC/build-torch-mlir" "$SRC/build-triton"
   fi
 fi
 if [ -f "$SRC/third_party/picolibc/.git_checked_ref" ]; then
@@ -577,10 +540,6 @@ run_step() {
 if [ ${#SELECTED_STEPS[@]} -gt 0 ]; then
   for step in "${SELECTED_STEPS[@]}"; do
     case "$step" in
-      musl)
-        unmark musl
-        unmark runtimes
-        ;;
       picolibc)
         unmark picolibc
         unmark runtimes

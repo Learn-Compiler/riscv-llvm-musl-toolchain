@@ -23,69 +23,131 @@ get_target_tools() {
   [ -x "$target_clang" ] || die "未找到编译器 $target_clang，请先完成 ./build.sh --step llvm"
 }
 
-# 确保 build-runtimes CMake 配置就绪 (compiler-rt for baremetal)
-ensure_compiler_rt_configured() {
-  local target_trip="${1:-$T}"
-  local target_arch="${2:-riscv32}"
-  local RUNTIMES_BUILD="${BUILD_RUNTIMES:-$SRC/build-runtimes}-${target_trip}"
-  mkdir -p "$RUNTIMES_BUILD"
-  
-  local target_cflags="${TARGET_EXTRA_CFLAGS:-}"
-  if [ "$target_arch" = "riscv64" ]; then
-    target_cflags="-march=rv64imafdc -mabi=lp64d"
+# 编译单个 multilib 架构矩阵的 compiler-rt builtins 与 crtbegin/crtend
+build_compiler_rt_variant() {
+  local target_trip="$1"  # riscv32-unknown-elf 或 riscv64-unknown-elf
+  local march="$2"        # 例如 rv32imafc
+  local mabi="$3"         # 例如 ilp32f
+  local rel_dir="$4"      # 例如 rv32imafc/ilp32f 或 .
+  local arch="$5"         # riscv32 或 riscv64
+  local clang_ver="$6"
+
+  local bdir="${BUILD_RUNTIMES:-$SRC/build-runtimes}-${target_trip}-${march}-${mabi}"
+  mkdir -p "$bdir"
+
+  local cfg_stamp="$bdir/.configured_state"
+  local cur_cfg="${target_trip}|${march}|${mabi}|${SYSROOT}"
+  local builtin_lib="$bdir/compiler-rt/lib/generic/libclang_rt.builtins-${arch}.a"
+
+  if [ ! -f "$builtin_lib" ] || [ ! -f "$cfg_stamp" ] || [ "$(cat "$cfg_stamp" 2>/dev/null)" != "$cur_cfg" ]; then
+    log "配置与编译 compiler-rt builtins [$target_trip, -march=$march -mabi=$mabi]"
+    rm -f "$bdir/build.ninja" "$bdir/CMakeCache.txt"
+    echo "$cur_cfg" > "$cfg_stamp"
+
+    local ccache_flag=()
+    if [ "${ENABLE_CCACHE:-AUTO}" != "OFF" ] && [ -x "$BOOT/bin/ccache" ]; then
+      ccache_flag=("-DLLVM_CCACHE_BUILD=ON")
+    fi
+
+    "$BOOT/bin/cmake" -G Ninja \
+      -S "$LLVM_DIR/runtimes" \
+      -B "$bdir" \
+      -DCMAKE_BUILD_TYPE="${RUNTIMES_BUILD_TYPE:-Release}" \
+      -DCMAKE_SYSTEM_NAME=Generic \
+      -DCMAKE_SYSTEM_PROCESSOR=riscv \
+      -DCMAKE_C_COMPILER="$target_clang" \
+      -DCMAKE_CXX_COMPILER="$target_clangxx" \
+      -DCMAKE_ASM_COMPILER="$target_clang" \
+      -DCMAKE_AR="$target_ar" \
+      -DCMAKE_NM="$target_nm" \
+      -DCMAKE_RANLIB="$target_ranlib" \
+      -DCMAKE_C_FLAGS="-march=$march -mabi=$mabi" \
+      -DCMAKE_CXX_FLAGS="-march=$march -mabi=$mabi" \
+      -DCMAKE_ASM_FLAGS="-march=$march -mabi=$mabi" \
+      -DLLVM_ENABLE_RUNTIMES="compiler-rt" \
+      -DCMAKE_C_COMPILER_TARGET="$target_trip" \
+      -DCMAKE_CXX_COMPILER_TARGET="$target_trip" \
+      -DCMAKE_ASM_COMPILER_TARGET="$target_trip" \
+      -DCMAKE_SYSROOT="$SYSROOT" \
+      -DCMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY \
+      -DCOMPILER_RT_DEFAULT_TARGET_ONLY=ON \
+      -DCOMPILER_RT_BUILD_CRT=OFF \
+      -DCOMPILER_RT_BUILD_BUILTINS=ON \
+      -DCOMPILER_RT_BUILD_SANITIZERS=OFF \
+      -DCOMPILER_RT_BUILD_XRAY=OFF \
+      -DCOMPILER_RT_BUILD_LIBFUZZER=OFF \
+      -DCOMPILER_RT_BUILD_PROFILE=OFF \
+      -DCOMPILER_RT_BUILD_MEMPROF=OFF \
+      -DCOMPILER_RT_BUILD_ORC=OFF \
+      -DCOMPILER_RT_BAREMETAL_BUILD=ON \
+      -DCOMPILER_RT_INCLUDE_TESTS=OFF \
+      -DLLVM_PARALLEL_LINK_JOBS=1 \
+      "${ccache_flag[@]}"
+
+    "$BOOT/bin/ninja" -C "$bdir" -j"$JOBS" builtins
   fi
 
-  local cfg_stamp="$RUNTIMES_BUILD/.configured_state"
-  local current_cfg_state="${target_trip}|${SYSROOT}|${target_cflags}"
-  if [ -f "$RUNTIMES_BUILD/build.ninja" ] && [ -f "$cfg_stamp" ] && [ "$(cat "$cfg_stamp" 2>/dev/null)" = "$current_cfg_state" ]; then
-    return 0
+  # 编译对应架构与 ABI 的 crtbegin.o 与 crtend.o
+  local tmp_crt="$bdir/crt"
+  mkdir -p "$tmp_crt"
+  "$target_clang" --target="$target_trip" -march="$march" -mabi="$mabi" \
+    -c "$LLVM_DIR/compiler-rt/lib/builtins/crtbegin.c" -o "$tmp_crt/clang_rt.crtbegin.o"
+  "$target_clang" --target="$target_trip" -march="$march" -mabi="$mabi" \
+    -c "$LLVM_DIR/compiler-rt/lib/builtins/crtend.c" -o "$tmp_crt/clang_rt.crtend.o"
+
+  # 部署到目标目录
+  local norm_trip="${target_trip//-unknown-elf/-unknown-unknown-elf}"
+  local res_dirs=(
+    "$INSTALL/lib/clang/$clang_ver/lib/$target_trip"
+    "$INSTALL/lib/clang/$clang_ver/lib/$norm_trip"
+  )
+
+  local sysroot_lib_dir="$SYSROOT/lib"
+  [ "$rel_dir" != "." ] && sysroot_lib_dir="$SYSROOT/lib/$rel_dir"
+
+  # 写入 sysroot 目标目录
+  mkdir -p "$sysroot_lib_dir"
+  cp -a "$builtin_lib" "$sysroot_lib_dir/libclang_rt.builtins.a"
+  cp -a "$builtin_lib" "$sysroot_lib_dir/libclang_rt.builtins-${arch}.a"
+  cp -a "$tmp_crt/clang_rt.crtbegin.o" "$sysroot_lib_dir/clang_rt.crtbegin.o"
+  cp -a "$tmp_crt/clang_rt.crtend.o" "$sysroot_lib_dir/clang_rt.crtend.o"
+  if [ "$rel_dir" != "." ]; then
+    mkdir -p "$SYSROOT/$rel_dir/lib"
+    cp -a "$builtin_lib" "$SYSROOT/$rel_dir/lib/libclang_rt.builtins.a"
+    cp -a "$builtin_lib" "$SYSROOT/$rel_dir/lib/libclang_rt.builtins-${arch}.a"
+    cp -a "$tmp_crt/clang_rt.crtbegin.o" "$SYSROOT/$rel_dir/lib/clang_rt.crtbegin.o"
+    cp -a "$tmp_crt/clang_rt.crtend.o" "$SYSROOT/$rel_dir/lib/clang_rt.crtend.o"
   fi
-  rm -f "$RUNTIMES_BUILD/build.ninja" "$RUNTIMES_BUILD/CMakeCache.txt"
-  echo "$current_cfg_state" > "$cfg_stamp"
 
-  log "配置 compiler-rt 目标运行库 CMake [Target: $target_trip, Sysroot: $SYSROOT]"
-  get_target_tools
+  # 写入 Clang 资源目录
+  for rdir in "${res_dirs[@]}"; do
+    local dest_rdir="$rdir"
+    [ "$rel_dir" != "." ] && dest_rdir="$rdir/$rel_dir"
+    mkdir -p "$dest_rdir"
+    cp -a "$builtin_lib" "$dest_rdir/libclang_rt.builtins.a"
+    cp -a "$builtin_lib" "$dest_rdir/libclang_rt.builtins-${arch}.a"
+    cp -a "$tmp_crt/clang_rt.crtbegin.o" "$dest_rdir/clang_rt.crtbegin.o"
+    cp -a "$tmp_crt/clang_rt.crtend.o" "$dest_rdir/clang_rt.crtend.o"
+  done
 
-  local ccache_flag=()
-  if [ "${ENABLE_CCACHE:-AUTO}" != "OFF" ] && [ -x "$BOOT/bin/ccache" ]; then
-    ccache_flag=("-DLLVM_CCACHE_BUILD=ON")
+  # 写入 baremetal 目录备查
+  local baremetal_dir="$INSTALL/lib/clang/$clang_ver/lib/baremetal"
+  mkdir -p "$baremetal_dir"
+  cp -a "$builtin_lib" "$baremetal_dir/libclang_rt.builtins-${arch}.a"
+
+  # 若为 64 位默认目标 (rv64imafdc/lp64d)，同时同步至 64 位根资源目录与 sysroot 根目录
+  if [ "$rel_dir" = "rv64imafdc/lp64d" ]; then
+    for rdir in "${res_dirs[@]}"; do
+      mkdir -p "$rdir"
+      cp -a "$builtin_lib" "$rdir/libclang_rt.builtins.a"
+      cp -a "$builtin_lib" "$rdir/libclang_rt.builtins-${arch}.a"
+      cp -a "$tmp_crt/clang_rt.crtbegin.o" "$rdir/clang_rt.crtbegin.o"
+      cp -a "$tmp_crt/clang_rt.crtend.o" "$rdir/clang_rt.crtend.o"
+    done
+    cp -a "$builtin_lib" "$SYSROOT/lib/libclang_rt.builtins-riscv64.a"
   fi
 
-  "$BOOT/bin/cmake" -G Ninja \
-    -S "$LLVM_DIR/runtimes" \
-    -B "$RUNTIMES_BUILD" \
-    -DCMAKE_BUILD_TYPE="${RUNTIMES_BUILD_TYPE:-Release}" \
-    -DCMAKE_INSTALL_PREFIX="$INSTALL" \
-    -DCMAKE_SYSTEM_NAME=Generic \
-    -DCMAKE_SYSTEM_PROCESSOR=riscv \
-    -DCMAKE_C_COMPILER="$target_clang" \
-    -DCMAKE_CXX_COMPILER="$target_clangxx" \
-    -DCMAKE_ASM_COMPILER="$target_clang" \
-    -DCMAKE_AR="$target_ar" \
-    -DCMAKE_NM="$target_nm" \
-    -DCMAKE_RANLIB="$target_ranlib" \
-    -DCMAKE_C_FLAGS="$target_cflags" \
-    -DCMAKE_CXX_FLAGS="$target_cflags" \
-    -DCMAKE_ASM_FLAGS="$target_cflags" \
-    -DLLVM_ENABLE_RUNTIMES="compiler-rt" \
-    -DCMAKE_C_COMPILER_TARGET="$target_trip" \
-    -DCMAKE_CXX_COMPILER_TARGET="$target_trip" \
-    -DCMAKE_ASM_COMPILER_TARGET="$target_trip" \
-    -DCMAKE_SYSROOT="$SYSROOT" \
-    -DCMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY \
-    -DCOMPILER_RT_DEFAULT_TARGET_ONLY=ON \
-    -DCOMPILER_RT_BUILD_CRT=ON \
-    -DCOMPILER_RT_BUILD_BUILTINS=ON \
-    -DCOMPILER_RT_BUILD_SANITIZERS=OFF \
-    -DCOMPILER_RT_BUILD_XRAY=OFF \
-    -DCOMPILER_RT_BUILD_LIBFUZZER=OFF \
-    -DCOMPILER_RT_BUILD_PROFILE=OFF \
-    -DCOMPILER_RT_BUILD_MEMPROF=OFF \
-    -DCOMPILER_RT_BUILD_ORC=OFF \
-    -DCOMPILER_RT_BAREMETAL_BUILD=ON \
-    -DCOMPILER_RT_INCLUDE_TESTS=OFF \
-    -DLLVM_PARALLEL_LINK_JOBS=1 \
-    "${ccache_flag[@]}"
+  ok "架构矩阵 $rel_dir ($target_trip, -march=$march -mabi=$mabi) 运行库就绪"
 }
 
 # 编译并部署 compiler-rt
@@ -98,93 +160,36 @@ step_compiler_rt() {
   get_target_tools
 
   local clang_ver
-  clang_ver=$("$target_clang" -dumpversion 2>/dev/null | cut -d. -f1 || echo "23")
+  clang_ver=$("$target_clang" -dumpversion 2>/dev/null | cut -d. -f1 || echo "20")
 
-  # 1. 编译并部署 riscv32-unknown-elf 的 builtins 与 crt
-  ensure_compiler_rt_configured "riscv32-unknown-elf" "riscv32"
-  local RUNTIMES_BUILD_32="${BUILD_RUNTIMES:-$SRC/build-runtimes}-riscv32-unknown-elf"
-  log "编译 riscv32 compiler-rt 目标库"
-  "$BOOT/bin/ninja" -C "$RUNTIMES_BUILD_32" -j"$JOBS" install-compiler-rt
+  log "编译并部署 Multilib 全矩阵 compiler-rt builtins 与 crt 启动对象"
 
-  local inst_res_32="$INSTALL/lib/clang/$clang_ver/lib/riscv32-unknown-elf"
-  local inst_baremetal_32="$INSTALL/lib/clang/$clang_ver/lib/baremetal"
-  mkdir -p "$inst_res_32" "$inst_baremetal_32" "$SYSROOT/lib"
+  # 8 大 Multilib 架构矩阵目标列表: target_trip:march:mabi:rel_dir:arch
+  local multilib_targets=(
+    "riscv32-unknown-elf:rv32i:ilp32:rv32i/ilp32:riscv32"
+    "riscv32-unknown-elf:rv32im:ilp32:rv32im/ilp32:riscv32"
+    "riscv32-unknown-elf:rv32iac:ilp32:rv32iac/ilp32:riscv32"
+    "riscv32-unknown-elf:rv32imac:ilp32:.:riscv32"
+    "riscv32-unknown-elf:rv32imafc:ilp32f:rv32imafc/ilp32f:riscv32"
+    "riscv32-unknown-elf:rv32imafdc:ilp32d:rv32imafdc/ilp32d:riscv32"
+    "riscv64-unknown-elf:rv64imac:lp64:rv64imac/lp64:riscv64"
+    "riscv64-unknown-elf:rv64imafdc:lp64d:rv64imafdc/lp64d:riscv64"
+  )
 
-  for b in "$RUNTIMES_BUILD_32/compiler-rt/lib/generic/libclang_rt.builtins-riscv32.a" \
-           "$RUNTIMES_BUILD_32/compiler-rt/lib/baremetal/libclang_rt.builtins-riscv32.a" \
-           "$INSTALL/lib/generic/libclang_rt.builtins-riscv32.a" \
-           "$INSTALL/lib/baremetal/libclang_rt.builtins-riscv32.a" \
-           "$INSTALL/lib/riscv32-unknown-elf/libclang_rt.builtins.a"; do
-    if [ -f "$b" ]; then
-      cp -a "$b" "$inst_res_32/libclang_rt.builtins.a"
-      cp -a "$b" "$inst_res_32/libclang_rt.builtins-riscv32.a"
-      cp -a "$b" "$SYSROOT/lib/libclang_rt.builtins.a"
-      cp -a "$b" "$SYSROOT/lib/libclang_rt.builtins-riscv32.a"
-      cp -a "$b" "$inst_baremetal_32/libclang_rt.builtins-riscv32.a"
-      break
-    fi
-  done
+  for entry in "${multilib_targets[@]}"; do
+    local ttrip march mabi rdir arch
+    ttrip="$(echo "$entry" | cut -d: -f1)"
+    march="$(echo "$entry" | cut -d: -f2)"
+    mabi="$(echo "$entry" | cut -d: -f3)"
+    rdir="$(echo "$entry" | cut -d: -f4)"
+    arch="$(echo "$entry" | cut -d: -f5)"
 
-  # 编译并部署 riscv32 的 crtbegin.o 与 crtend.o
-  log "编译 riscv32 crtbegin.o 与 crtend.o"
-  "$target_clang" --target=riscv32-unknown-elf -march=rv32imac -mabi=ilp32 -c "$LLVM_DIR/compiler-rt/lib/builtins/crtbegin.c" -o "$inst_res_32/clang_rt.crtbegin.o"
-  "$target_clang" --target=riscv32-unknown-elf -march=rv32imac -mabi=ilp32 -c "$LLVM_DIR/compiler-rt/lib/builtins/crtend.c" -o "$inst_res_32/clang_rt.crtend.o"
-  cp -a "$inst_res_32/clang_rt.crtbegin.o" "$SYSROOT/lib/clang_rt.crtbegin.o"
-  cp -a "$inst_res_32/clang_rt.crtend.o" "$SYSROOT/lib/clang_rt.crtend.o"
-
-  # 2. 编译并部署 riscv64-unknown-elf 的 builtins 与 crt
-  ensure_compiler_rt_configured "riscv64-unknown-elf" "riscv64"
-  local RUNTIMES_BUILD_64="${BUILD_RUNTIMES:-$SRC/build-runtimes}-riscv64-unknown-elf"
-  log "编译 riscv64 compiler-rt 目标库"
-  "$BOOT/bin/ninja" -C "$RUNTIMES_BUILD_64" -j"$JOBS" install-compiler-rt
-
-  local inst_res_64="$INSTALL/lib/clang/$clang_ver/lib/riscv64-unknown-elf"
-  mkdir -p "$inst_res_64"
-  for b in "$RUNTIMES_BUILD_64/compiler-rt/lib/generic/libclang_rt.builtins-riscv64.a" \
-           "$RUNTIMES_BUILD_64/compiler-rt/lib/baremetal/libclang_rt.builtins-riscv64.a" \
-           "$INSTALL/lib/generic/libclang_rt.builtins-riscv64.a" \
-           "$INSTALL/lib/baremetal/libclang_rt.builtins-riscv64.a" \
-           "$INSTALL/lib/riscv64-unknown-elf/libclang_rt.builtins.a"; do
-    if [ -f "$b" ]; then
-      cp -a "$b" "$inst_res_64/libclang_rt.builtins.a"
-      cp -a "$b" "$inst_res_64/libclang_rt.builtins-riscv64.a"
-      cp -a "$b" "$SYSROOT/lib/libclang_rt.builtins-riscv64.a"
-      cp -a "$b" "$inst_baremetal_32/libclang_rt.builtins-riscv64.a"
-      break
-    fi
-  done
-
-  # 编译并部署 riscv64 的 crtbegin.o 与 crtend.o
-  log "编译 riscv64 crtbegin.o 与 crtend.o"
-  "$target_clang" --target=riscv64-unknown-elf -march=rv64gc -mabi=lp64d -c "$LLVM_DIR/compiler-rt/lib/builtins/crtbegin.c" -o "$inst_res_64/clang_rt.crtbegin.o"
-  "$target_clang" --target=riscv64-unknown-elf -march=rv64gc -mabi=lp64d -c "$LLVM_DIR/compiler-rt/lib/builtins/crtend.c" -o "$inst_res_64/clang_rt.crtend.o"
-
-  # 3. 部署 Clang resource-dir 下的标准化与 multilib 软链接 (支持 riscv*-unknown-unknown-elf)
-  local inst_uue_32="$INSTALL/lib/clang/$clang_ver/lib/riscv32-unknown-unknown-elf"
-  local inst_uue_64="$INSTALL/lib/clang/$clang_ver/lib/riscv64-unknown-unknown-elf"
-  mkdir -p "$inst_uue_32" "$inst_uue_64"
-  cp -a "$inst_res_32"/* "$inst_uue_32/" 2>/dev/null || true
-  cp -a "$inst_res_64"/* "$inst_uue_64/" 2>/dev/null || true
-
-  for v in rv32i/ilp32 rv32im/ilp32 rv32iac/ilp32 rv32imafc/ilp32f rv32imafdc/ilp32d; do
-    mkdir -p "$inst_uue_32/$v" "$SYSROOT/lib/$v"
-    ln -sfn ../../libclang_rt.builtins-riscv32.a "$inst_uue_32/$v/libclang_rt.builtins.a"
-    ln -sfn ../../clang_rt.crtbegin.o "$inst_uue_32/$v/clang_rt.crtbegin.o"
-    ln -sfn ../../clang_rt.crtend.o "$inst_uue_32/$v/clang_rt.crtend.o"
-    ln -sfn ../libclang_rt.builtins-riscv32.a "$SYSROOT/lib/$v/libclang_rt.builtins.a" 2>/dev/null || true
-  done
-
-  for v in rv64imac/lp64 rv64imafdc/lp64d; do
-    mkdir -p "$inst_uue_64/$v" "$SYSROOT/lib/$v"
-    ln -sfn ../../libclang_rt.builtins-riscv64.a "$inst_uue_64/$v/libclang_rt.builtins.a"
-    ln -sfn ../../clang_rt.crtbegin.o "$inst_uue_64/$v/clang_rt.crtbegin.o"
-    ln -sfn ../../clang_rt.crtend.o "$inst_uue_64/$v/clang_rt.crtend.o"
-    ln -sfn ../libclang_rt.builtins-riscv64.a "$SYSROOT/lib/$v/libclang_rt.builtins.a" 2>/dev/null || true
+    build_compiler_rt_variant "$ttrip" "$march" "$mabi" "$rdir" "$arch" "$clang_ver"
   done
 
   mark compiler_rt
   mark builtins
-  ok "compiler-rt builtins 与 crt 运行库部署完成"
+  ok "全部 Multilib 矩阵 compiler-rt builtins 与 crt 运行库部署完成"
 }
 
 # 统一目标端运行库构建

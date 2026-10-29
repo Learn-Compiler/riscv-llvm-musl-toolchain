@@ -4,9 +4,9 @@
 # 本分支为专注于 RISC-V 裸机 Baremetal ELF 的 LLVM + Picolibc 交叉编译工具链。
 # 版本严格遵守 Learn-Compiler/riscv-gnu-toolchain master 分支的 submodule 锁定版本。
 #
-# 1. LLVM 核心版本 (官方正式发布版本)
-LLVM_REF="${LLVM_REF:-llvmorg-23.1.4}"
-LLVM_REPO="${LLVM_REPO:-https://github.com/llvm/llvm-project.git}"
+# 1. LLVM 核心版本 (对齐 Learn-Compiler/riscv-gnu-toolchain 仓库 master 分支)
+LLVM_REF="${LLVM_REF:-ea7d852a70e8bdfaf601d6626a760f9771b2c4b4}"
+LLVM_REPO="${LLVM_REPO:-git@github.com:Learn-Compiler/llvm-project.git}"
 
 # 2. 目标端 Picolibc C 运行库 (对齐 Learn-Compiler/riscv-gnu-toolchain 仓库 master 分支)
 PICOLIBC_REF="${PICOLIBC_REF:-2ae376c6cdf4fef90ca2388ecf7a07457fa63cff}"

@@ -11,28 +11,14 @@ if [ -z "${SRC:-}" ]; then
 fi
 
 INSTALL_TOOLCHAIN="${INSTALL_TOOLCHAIN:-${INSTALL:-$SRC/install-toolchain}}"
-INSTALL_AI="${INSTALL_AI:-$SRC/install-ai}"
 INSTALL="${INSTALL_TOOLCHAIN}"
 SYSROOT="${SYSROOT:-$INSTALL/sysroot}"
-BUILD="${BUILD:-$SRC/build-llvm-musl}"
+BUILD="${BUILD:-$SRC/build-llvm}"
 BUILD_RUNTIMES="${BUILD_RUNTIMES:-$SRC/build-runtimes}"
 BOOT="${BOOT:-$SRC/.bootstrap}"
 STAMPS="${STAMPS:-$SRC/.build-stamps}"
 LLVM_DIR="${LLVM_DIR:-$SRC/third_party/llvm}"
-MUSL_DIR="${MUSL_DIR:-$SRC/third_party/musl}"
-LINUX_HEADERS_DIR="${LINUX_HEADERS_DIR:-$SRC/third_party/linux-headers}"
-
-get_linux_headers_include_dir() {
-  if [ -d "${LINUX_HEADERS_DIR:-}/include" ]; then
-    echo "$LINUX_HEADERS_DIR/include"
-  elif [ -d "${LINUX_HEADERS_DIR:-}/riscv/include" ]; then
-    echo "$LINUX_HEADERS_DIR/riscv/include"
-  elif [ -d "$SRC/linux-headers/include" ]; then
-    echo "$SRC/linux-headers/include"
-  else
-    echo "${LINUX_HEADERS_DIR:-$SRC/third_party/linux-headers}/include"
-  fi
-}
+PICOLIBC_SRC="${PICOLIBC_SRC:-$SRC/third_party/picolibc}"
 
 # 将自举引导工具优先加入 PATH 与动态库检索路径
 export PATH="$BOOT/bin:${PATH}"
@@ -49,7 +35,7 @@ die()  { printf '\n%s!! %s%s\n' "$c_er" "$*" "$c_off" >&2; exit 1; }
 is_done() {
   local name="$1"
   case "$name" in
-    picolibc|musl|compiler_rt|builtins|libcxx|libc++|runtimes|verify|package)
+    picolibc|compiler_rt|builtins|runtimes|verify|package)
       [ -f "$STAMPS/${name}_${TARGET:-default}" ] || [ -f "$STAMPS/${TARGET:-default}/$name" ]
       ;;
     *)
@@ -61,7 +47,7 @@ mark() {
   local name="$1"
   mkdir -p "$STAMPS"
   case "$name" in
-    picolibc|musl|compiler_rt|builtins|libcxx|libc++|runtimes|verify|package)
+    picolibc|compiler_rt|builtins|runtimes|verify|package)
       mkdir -p "$STAMPS/${TARGET:-default}"
       date '+%F %T' > "$STAMPS/${name}_${TARGET:-default}"
       date '+%F %T' > "$STAMPS/${TARGET:-default}/$name"
@@ -74,7 +60,7 @@ mark() {
 unmark() {
   local name="$1"
   case "$name" in
-    picolibc|musl|compiler_rt|builtins|libcxx|libc++|runtimes|verify|package)
+    picolibc|compiler_rt|builtins|runtimes|verify|package)
       rm -f "$STAMPS/${name}_${TARGET:-default}" "$STAMPS/${TARGET:-default}/$name" "$STAMPS/$name"
       ;;
     *)
