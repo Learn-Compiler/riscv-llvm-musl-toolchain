@@ -9,6 +9,8 @@
 /*.tar.zst
 /SHA256SUMS
 /riscv64-unknown-musl-linux/
+.git_checked_ref
+.applied_*
 
 # Editor / OS
 .DS_Store
