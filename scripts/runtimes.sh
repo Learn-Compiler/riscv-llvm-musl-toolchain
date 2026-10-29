@@ -107,12 +107,16 @@ build_compiler_rt_variant() {
 
   # 写入 sysroot 目标目录
   mkdir -p "$sysroot_lib_dir"
+  rm -f "$sysroot_lib_dir/libclang_rt.builtins.a" "$sysroot_lib_dir/libclang_rt.builtins-${arch}.a" \
+        "$sysroot_lib_dir/clang_rt.crtbegin.o" "$sysroot_lib_dir/clang_rt.crtend.o"
   cp -a "$builtin_lib" "$sysroot_lib_dir/libclang_rt.builtins.a"
   cp -a "$builtin_lib" "$sysroot_lib_dir/libclang_rt.builtins-${arch}.a"
   cp -a "$tmp_crt/clang_rt.crtbegin.o" "$sysroot_lib_dir/clang_rt.crtbegin.o"
   cp -a "$tmp_crt/clang_rt.crtend.o" "$sysroot_lib_dir/clang_rt.crtend.o"
   if [ "$rel_dir" != "." ]; then
     mkdir -p "$SYSROOT/$rel_dir/lib"
+    rm -f "$SYSROOT/$rel_dir/lib/libclang_rt.builtins.a" "$SYSROOT/$rel_dir/lib/libclang_rt.builtins-${arch}.a" \
+          "$SYSROOT/$rel_dir/lib/clang_rt.crtbegin.o" "$SYSROOT/$rel_dir/lib/clang_rt.crtend.o"
     cp -a "$builtin_lib" "$SYSROOT/$rel_dir/lib/libclang_rt.builtins.a"
     cp -a "$builtin_lib" "$SYSROOT/$rel_dir/lib/libclang_rt.builtins-${arch}.a"
     cp -a "$tmp_crt/clang_rt.crtbegin.o" "$SYSROOT/$rel_dir/lib/clang_rt.crtbegin.o"
@@ -124,6 +128,8 @@ build_compiler_rt_variant() {
     local dest_rdir="$rdir"
     [ "$rel_dir" != "." ] && dest_rdir="$rdir/$rel_dir"
     mkdir -p "$dest_rdir"
+    rm -f "$dest_rdir/libclang_rt.builtins.a" "$dest_rdir/libclang_rt.builtins-${arch}.a" \
+          "$dest_rdir/clang_rt.crtbegin.o" "$dest_rdir/clang_rt.crtend.o"
     cp -a "$builtin_lib" "$dest_rdir/libclang_rt.builtins.a"
     cp -a "$builtin_lib" "$dest_rdir/libclang_rt.builtins-${arch}.a"
     cp -a "$tmp_crt/clang_rt.crtbegin.o" "$dest_rdir/clang_rt.crtbegin.o"
@@ -133,17 +139,21 @@ build_compiler_rt_variant() {
   # 写入 baremetal 目录备查
   local baremetal_dir="$INSTALL/lib/clang/$clang_ver/lib/baremetal"
   mkdir -p "$baremetal_dir"
+  rm -f "$baremetal_dir/libclang_rt.builtins-${arch}.a"
   cp -a "$builtin_lib" "$baremetal_dir/libclang_rt.builtins-${arch}.a"
 
   # 若为 64 位默认目标 (rv64imafdc/lp64d)，同时同步至 64 位根资源目录与 sysroot 根目录
   if [ "$rel_dir" = "rv64imafdc/lp64d" ]; then
     for rdir in "${res_dirs[@]}"; do
       mkdir -p "$rdir"
+      rm -f "$rdir/libclang_rt.builtins.a" "$rdir/libclang_rt.builtins-${arch}.a" \
+            "$rdir/clang_rt.crtbegin.o" "$rdir/clang_rt.crtend.o"
       cp -a "$builtin_lib" "$rdir/libclang_rt.builtins.a"
       cp -a "$builtin_lib" "$rdir/libclang_rt.builtins-${arch}.a"
       cp -a "$tmp_crt/clang_rt.crtbegin.o" "$rdir/clang_rt.crtbegin.o"
       cp -a "$tmp_crt/clang_rt.crtend.o" "$rdir/clang_rt.crtend.o"
     done
+    rm -f "$SYSROOT/lib/libclang_rt.builtins-riscv64.a"
     cp -a "$builtin_lib" "$SYSROOT/lib/libclang_rt.builtins-riscv64.a"
   fi
 
