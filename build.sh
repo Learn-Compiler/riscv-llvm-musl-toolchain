@@ -428,13 +428,13 @@ while [ $# -gt 0 ]; do
       ;;
     --clean)
       log "清理构建缓存与时间戳 ..."
-      rm -rf "$STAMPS" "$BUILD" "$SRC/build-compiler-rt" "$SRC/build-runtimes" "$SRC/build-runtimes-riscv32" "$SRC/build-torch-mlir" "$SRC/build-triton" "${INSTALL_TOOLCHAIN:-$INSTALL}" "${INSTALL_AI:-$SRC/install-ai}" "$SRC/install-clang-musl" "$SRC/env.sh" "$SHIM"
+      rm -rf "$STAMPS" "$BUILD_DIR" "$BUILD" "$SRC/build-compiler-rt" "$SRC/build-runtimes"* "$SRC/build-torch-mlir" "$SRC/build-triton" "${INSTALL_TOOLCHAIN:-$INSTALL}" "${INSTALL_AI:-$SRC/install-ai}" "$SRC/install-clang-musl" "$SRC/env.sh" "$SHIM"
       ok "清理完成"
       exit 0
       ;;
     --clean-all)
       log "完全清理构建缓存与引导环境 ..."
-      rm -rf "$STAMPS" "$BUILD" "$SRC/build-compiler-rt" "$SRC/build-runtimes" "$SRC/build-runtimes-riscv32" "$SRC/build-torch-mlir" "$SRC/build-triton" "${INSTALL_TOOLCHAIN:-$INSTALL}" "${INSTALL_AI:-$SRC/install-ai}" "$SRC/install-clang-musl" "$SRC/env.sh" "$SHIM" "$BOOT"
+      rm -rf "$STAMPS" "$BUILD_DIR" "$BUILD" "$SRC/build-compiler-rt" "$SRC/build-runtimes"* "$SRC/build-torch-mlir" "$SRC/build-triton" "${INSTALL_TOOLCHAIN:-$INSTALL}" "${INSTALL_AI:-$SRC/install-ai}" "$SRC/install-clang-musl" "$SRC/env.sh" "$SHIM" "$BOOT"
       ok "全部清理完成"
       exit 0
       ;;
@@ -550,7 +550,7 @@ if [ -f "$SRC/third_party/llvm/.git_checked_ref" ]; then
     unmark triton
     unmark prune
     unmark verify
-    rm -rf "$SRC/build-torch-mlir" "$SRC/build-triton"
+    rm -rf "$BUILD_DIR/build-torch-mlir" "$BUILD_DIR/build-triton" "$SRC/build-torch-mlir" "$SRC/build-triton"
   fi
 fi
 if [ -f "$SRC/third_party/torch-mlir/.git_checked_ref" ]; then
@@ -559,7 +559,7 @@ if [ -f "$SRC/third_party/torch-mlir/.git_checked_ref" ]; then
     warn "检测到 torch-mlir 实际版本 ($CHECKED_TORCH_REF) 与配置 ($TORCH_MLIR_REF) 不一致，重置源码与构建步骤"
     unmark fetch
     unmark torch_mlir
-    rm -rf "$SRC/build-torch-mlir"
+    rm -rf "$BUILD_DIR/build-torch-mlir" "$SRC/build-torch-mlir"
   fi
 fi
 if [ -f "$SRC/third_party/triton/.git_checked_ref" ]; then
@@ -568,7 +568,7 @@ if [ -f "$SRC/third_party/triton/.git_checked_ref" ]; then
     warn "检测到 triton 实际版本 ($CHECKED_TRITON_REF) 与配置 ($TRITON_REF) 不一致，重置源码与构建步骤"
     unmark fetch
     unmark triton
-    rm -rf "$SRC/build-triton"
+    rm -rf "$BUILD_DIR/build-triton" "$SRC/build-triton"
   fi
 fi
 mkdir -p "$STAMPS"
@@ -628,7 +628,7 @@ step_musl_rv32() {
   local saved_t="$TARGET" saved_sysroot="${SYSROOT:-}" saved_br="${BUILD_RUNTIMES:-}"
   TARGET="riscv32-linux-musl"
   SYSROOT="${INSTALL}/sysroot32"
-  BUILD_RUNTIMES="$SRC/build-runtimes-riscv32"
+  BUILD_RUNTIMES="$BUILD_DIR/build-runtimes-riscv32"
   unset TARGET_EXTRA_CFLAGS
   init_config
   SYSROOT="${INSTALL}/sysroot32"
@@ -644,7 +644,7 @@ step_compiler_rt_rv32() {
   local saved_t="$TARGET" saved_sysroot="${SYSROOT:-}" saved_br="${BUILD_RUNTIMES:-}"
   TARGET="riscv32-linux-musl"
   SYSROOT="${INSTALL}/sysroot32"
-  BUILD_RUNTIMES="$SRC/build-runtimes-riscv32"
+  BUILD_RUNTIMES="$BUILD_DIR/build-runtimes-riscv32"
   unset TARGET_EXTRA_CFLAGS
   init_config
   SYSROOT="${INSTALL}/sysroot32"
@@ -660,7 +660,7 @@ step_libcxx_rv32() {
   local saved_t="$TARGET" saved_sysroot="${SYSROOT:-}" saved_br="${BUILD_RUNTIMES:-}"
   TARGET="riscv32-linux-musl"
   SYSROOT="${INSTALL}/sysroot32"
-  BUILD_RUNTIMES="$SRC/build-runtimes-riscv32"
+  BUILD_RUNTIMES="$BUILD_DIR/build-runtimes-riscv32"
   unset TARGET_EXTRA_CFLAGS
   init_config
   SYSROOT="${INSTALL}/sysroot32"
@@ -677,7 +677,7 @@ step_runtimes_rv32() {
   local saved_t="$TARGET" saved_sysroot="${SYSROOT:-}" saved_br="${BUILD_RUNTIMES:-}"
   TARGET="riscv32-linux-musl"
   SYSROOT="${INSTALL}/sysroot32"
-  BUILD_RUNTIMES="$SRC/build-runtimes-riscv32"
+  BUILD_RUNTIMES="$BUILD_DIR/build-runtimes-riscv32"
   unset TARGET_EXTRA_CFLAGS
   init_config
   SYSROOT="${INSTALL}/sysroot32"
@@ -698,7 +698,7 @@ step_verify_rv32() {
   local saved_t="$TARGET" saved_sysroot="${SYSROOT:-}" saved_br="${BUILD_RUNTIMES:-}"
   TARGET="riscv32-linux-musl"
   SYSROOT="${INSTALL}/sysroot32"
-  BUILD_RUNTIMES="$SRC/build-runtimes-riscv32"
+  BUILD_RUNTIMES="$BUILD_DIR/build-runtimes-riscv32"
   unset TARGET_EXTRA_CFLAGS
   init_config
   SYSROOT="${INSTALL}/sysroot32"

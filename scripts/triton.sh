@@ -44,7 +44,7 @@ step_triton() {
   if [ -L "$SRC/third_party/triton" ] && [ -z "${CLI_TRITON_SRC:-}" ]; then
     warn "检测到 third_party/triton 为外部陈旧版本软链接，正在自动清理并切回对齐源码 ..."
     rm -f "$SRC/third_party/triton"
-    rm -rf "$SRC/build-triton"
+    rm -rf "$BUILD_DIR/build-triton" "$SRC/build-triton"
   fi
 
   local triton_src="${TRITON_SRC:-$SRC/third_party/triton}"
@@ -114,7 +114,7 @@ step_triton() {
   align_and_check_triton_version "$triton_src"
 
   log "配置并构建 triton 到统一 AI 目录 ($INSTALL_AI)"
-  local TRITON_BUILD="$SRC/build-triton"
+  local TRITON_BUILD="$BUILD_DIR/build-triton"
   mkdir -p "$TRITON_BUILD" "$INSTALL_AI"
   rm -rf "$TRITON_BUILD/CMakeCache.txt" "$TRITON_BUILD/CMakeFiles"
 

@@ -41,7 +41,7 @@ step_torch_mlir() {
   if [ -L "$SRC/third_party/torch-mlir" ] && [ -z "${CLI_TORCH_MLIR_SRC:-}" ]; then
     warn "检测到 third_party/torch-mlir 为外部陈旧版本软链接，正在自动清理并切回对齐源码 ..."
     rm -f "$SRC/third_party/torch-mlir"
-    rm -rf "$SRC/build-torch-mlir"
+    rm -rf "$BUILD_DIR/build-torch-mlir" "$SRC/build-torch-mlir"
   fi
 
   local torch_src="${TORCH_MLIR_SRC:-$SRC/third_party/torch-mlir}"
@@ -118,7 +118,7 @@ step_torch_mlir() {
   fi
 
   log "配置并构建 torch-mlir 到统一 AI 目录 ($INSTALL_AI)"
-  local TORCH_BUILD="$SRC/build-torch-mlir"
+  local TORCH_BUILD="$BUILD_DIR/build-torch-mlir"
   mkdir -p "$TORCH_BUILD" "$INSTALL_AI"
   rm -rf "$TORCH_BUILD/CMakeCache.txt" "$TORCH_BUILD/CMakeFiles"
 

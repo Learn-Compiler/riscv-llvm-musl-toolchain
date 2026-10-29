@@ -119,7 +119,7 @@ step_fetch() {
     if [ -L "$SRC/third_party/torch-mlir" ]; then
       warn "解除外部陈旧软链接: $SRC/third_party/torch-mlir"
       rm -f "$SRC/third_party/torch-mlir"
-      rm -rf "$SRC/build-torch-mlir"
+      rm -rf "$BUILD_DIR/build-torch-mlir" "$SRC/build-torch-mlir"
     fi
     checkout_repo_ref "$SRC/third_party/torch-mlir" "${TORCH_MLIR_REPO:-https://github.com/llvm/torch-mlir.git}" "${TORCH_MLIR_REF:-v20261001}" "CMakeLists.txt" "torch-mlir"
   fi
@@ -154,7 +154,7 @@ step_fetch() {
     if [ -L "$SRC/third_party/triton" ]; then
       warn "解除外部陈旧软链接: $SRC/third_party/triton"
       rm -f "$SRC/third_party/triton"
-      rm -rf "$SRC/build-triton"
+      rm -rf "$BUILD_DIR/build-triton" "$SRC/build-triton"
     fi
     checkout_repo_ref "$SRC/third_party/triton" "${TRITON_REPO:-https://github.com/triton-lang/triton.git}" "${TRITON_REF:-v3.2.0}" "CMakeLists.txt" "triton"
   fi

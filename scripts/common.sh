@@ -10,12 +10,13 @@ if [ -z "${SRC:-}" ]; then
   SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 fi
 
+BUILD_DIR="${BUILD_DIR:-$SRC/build}"
 INSTALL_TOOLCHAIN="${INSTALL_TOOLCHAIN:-${INSTALL:-$SRC/install-toolchain}}"
 INSTALL_AI="${INSTALL_AI:-$SRC/install-ai}"
 INSTALL="${INSTALL_TOOLCHAIN}"
 SYSROOT="${SYSROOT:-$INSTALL/sysroot}"
-BUILD="${BUILD:-$SRC/build-llvm-musl}"
-BUILD_RUNTIMES="${BUILD_RUNTIMES:-$SRC/build-runtimes}"
+BUILD="${BUILD:-$BUILD_DIR/build-llvm-musl}"
+BUILD_RUNTIMES="${BUILD_RUNTIMES:-$BUILD_DIR/build-runtimes}"
 BOOT="${BOOT:-$SRC/.bootstrap}"
 STAMPS="${STAMPS:-$SRC/.build-stamps}"
 LLVM_DIR="${LLVM_DIR:-$SRC/third_party/llvm}"
@@ -196,9 +197,9 @@ init_config() {
 
   if [ -z "${BUILD_RUNTIMES_OVERRIDDEN:-}" ]; then
     if [ "$TARGET" = "riscv32-linux-musl" ]; then
-      BUILD_RUNTIMES="$SRC/build-runtimes-riscv32"
+      BUILD_RUNTIMES="$BUILD_DIR/build-runtimes-riscv32"
     else
-      BUILD_RUNTIMES="$SRC/build-runtimes"
+      BUILD_RUNTIMES="$BUILD_DIR/build-runtimes"
     fi
   fi
 

@@ -29,7 +29,7 @@ get_target_tools() {
 
 # 确保 build-runtimes CMake 配置就绪
 ensure_runtimes_configured() {
-  local RUNTIMES_BUILD="${BUILD_RUNTIMES:-$SRC/build-runtimes}"
+  local RUNTIMES_BUILD="${BUILD_RUNTIMES:-$BUILD_DIR/build-runtimes}"
   local opt_level="${RUNTIMES_OPT_LEVEL:-default}"
   mkdir -p "$RUNTIMES_BUILD"
   local target_cflags="${TARGET_EXTRA_CFLAGS:-}"
@@ -189,7 +189,7 @@ step_compiler_rt() {
   get_target_tools
   ensure_runtimes_configured
 
-  local RUNTIMES_BUILD="${BUILD_RUNTIMES:-$SRC/build-runtimes}"
+  local RUNTIMES_BUILD="${BUILD_RUNTIMES:-$BUILD_DIR/build-runtimes}"
   log "编译并安装 compiler-rt 目标库 (builtins / crt)"
   "$BOOT/bin/ninja" -C "$RUNTIMES_BUILD" -j"$JOBS" install-compiler-rt
 
@@ -247,7 +247,7 @@ step_libcxx() {
   get_target_tools
   ensure_runtimes_configured
 
-  local RUNTIMES_BUILD="${BUILD_RUNTIMES:-$SRC/build-runtimes}"
+  local RUNTIMES_BUILD="${BUILD_RUNTIMES:-$BUILD_DIR/build-runtimes}"
   log "编译并安装 C++ 目标运行库 (libunwind / libc++ / libc++abi)"
   "$BOOT/bin/ninja" -C "$RUNTIMES_BUILD" -j"$JOBS" install-cxx install-cxxabi install-unwind
 
