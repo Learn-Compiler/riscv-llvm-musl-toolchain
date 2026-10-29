@@ -45,7 +45,7 @@ step_picolibc() {
   [ -n "$ninja_bin" ] || die "未找到 ninja 工具"
 
   log "使用 LLVM 编译目标 Picolibc C 运行库 (Meson + Ninja, 多 march 矩阵)"
-  local BUILD_PICOLIBC="$SRC/build-picolibc"
+  local BUILD_PICOLIBC="${BUILD_PICOLIBC:-$BUILD_DIR/build-picolibc}"
   mkdir -p "$BUILD_PICOLIBC" "$SYSROOT/lib" "$SYSROOT/include"
 
   # 1. 生成主 Meson 交叉编译配置 (基于 riscv32-unknown-elf)
@@ -117,7 +117,7 @@ EOF
       fi
 
       log "编译扩展矩阵目标: $rel_dir ($flags)"
-      local mdir="$SRC/build-picolibc-${rel_dir//\//_}"
+      local mdir="$BUILD_DIR/build-picolibc-${rel_dir//\//_}"
       mkdir -p "$mdir"
       local mcross="$mdir/cross.ini"
       

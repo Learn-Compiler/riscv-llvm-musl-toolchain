@@ -10,11 +10,12 @@ if [ -z "${SRC:-}" ]; then
   SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 fi
 
+BUILD_DIR="${BUILD_DIR:-$SRC/build}"
 INSTALL_TOOLCHAIN="${INSTALL_TOOLCHAIN:-${INSTALL:-$SRC/install-toolchain}}"
 INSTALL="${INSTALL_TOOLCHAIN}"
 SYSROOT="${SYSROOT:-$INSTALL/sysroot}"
-BUILD="${BUILD:-$SRC/build-llvm}"
-BUILD_RUNTIMES="${BUILD_RUNTIMES:-$SRC/build-runtimes}"
+BUILD="${BUILD:-$BUILD_DIR/build-llvm}"
+BUILD_RUNTIMES="${BUILD_RUNTIMES:-$BUILD_DIR/build-runtimes}"
 BOOT="${BOOT:-$SRC/.bootstrap}"
 STAMPS="${STAMPS:-$SRC/.build-stamps}"
 LLVM_DIR="${LLVM_DIR:-$SRC/third_party/llvm}"
@@ -167,7 +168,7 @@ init_config() {
   fi
 
   if [ -z "${BUILD_RUNTIMES_OVERRIDDEN:-}" ]; then
-    BUILD_RUNTIMES="$SRC/build-runtimes"
+    BUILD_RUNTIMES="$BUILD_DIR/build-runtimes"
   fi
 
   # 5. 载入已探测持久化的宿主编译器编译参数（若已探测）

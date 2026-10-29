@@ -2,6 +2,7 @@
 /.bootstrap/
 /.build-stamps/
 /.musl-shim/
+/build/
 /build-*/
 /install-*
 /env.sh

@@ -32,7 +32,7 @@ build_compiler_rt_variant() {
   local arch="$5"         # riscv32 或 riscv64
   local clang_ver="$6"
 
-  local bdir="${BUILD_RUNTIMES:-$SRC/build-runtimes}-${target_trip}-${march}-${mabi}"
+  local bdir="${BUILD_RUNTIMES:-$BUILD_DIR/build-runtimes}-${target_trip}-${march}-${mabi}"
   mkdir -p "$bdir"
 
   local cfg_stamp="$bdir/.configured_state"

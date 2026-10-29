@@ -333,13 +333,13 @@ while [ $# -gt 0 ]; do
       ;;
     --clean)
       log "清理构建缓存与时间戳 ..."
-      rm -rf "$STAMPS" "$BUILD" "$SRC/build-compiler-rt"* "$SRC/build-runtimes"* "$SRC/build-picolibc"* "${INSTALL_TOOLCHAIN:-$INSTALL}" "$SRC/env.sh"
+      rm -rf "$STAMPS" "$BUILD_DIR" "$BUILD" "$SRC/build-compiler-rt"* "$SRC/build-runtimes"* "$SRC/build-picolibc"* "${INSTALL_TOOLCHAIN:-$INSTALL}" "$SRC/env.sh"
       ok "清理完成"
       exit 0
       ;;
     --clean-all)
       log "完全清理构建缓存与引导环境 ..."
-      rm -rf "$STAMPS" "$BUILD" "$SRC/build-compiler-rt"* "$SRC/build-runtimes"* "$SRC/build-picolibc"* "${INSTALL_TOOLCHAIN:-$INSTALL}" "$SRC/env.sh" "$BOOT"
+      rm -rf "$STAMPS" "$BUILD_DIR" "$BUILD" "$SRC/build-compiler-rt"* "$SRC/build-runtimes"* "$SRC/build-picolibc"* "${INSTALL_TOOLCHAIN:-$INSTALL}" "$SRC/env.sh" "$BOOT"
       ok "全部清理完成"
       exit 0
       ;;
@@ -438,7 +438,7 @@ if [ -f "$SRC/third_party/picolibc/.git_checked_ref" ]; then
     unmark fetch
     unmark picolibc
     unmark runtimes
-    rm -rf "$SRC/build-picolibc"*
+    rm -rf "$BUILD_DIR/build-picolibc"* "$SRC/build-picolibc"*
   fi
 fi
 mkdir -p "$STAMPS"
